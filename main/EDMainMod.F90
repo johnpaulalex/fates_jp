@@ -855,7 +855,7 @@ contains
     call TotalBalanceCheck(currentSite,6,is_restarting=is_restarting)
 
     if(hlm_use_sp.eq.ifalse .and. (.not.is_restarting) )then
-       call canopy_structure(currentSite, bc_in)
+       call canopy_structure(currentSite, bc_in, leaf_organ)
     endif
 
     call TotalBalanceCheck(currentSite,final_check_id,is_restarting=is_restarting)
