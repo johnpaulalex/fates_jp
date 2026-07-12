@@ -11,6 +11,9 @@ module test_LeafBiophysics
                                 LeafLayerMaintenanceRespiration_Ryan_1991, &
                                 LeafLayerMaintenanceRespiration_Atkin_etal_2017, &
                                 GetCanopyGasParameters, &
+                                DecayCoeffVcmax, &
+                                GetConstrainedVPress, &
+                                VeloToMolarCF, &
                                 lb_params, &
                                 c3_path_index, &
                                 c4_path_index
@@ -267,5 +270,55 @@ module test_LeafBiophysics
       @assertEqual(1.0_r8, mm_ko2, tolerance=tol)
       @assertEqual(1.0_r8, co2_cpoint, tolerance=tol)
     end subroutine test_GetCanopyGasParameters
+
+    @Test
+    subroutine test_DecayCoeffVcmax(this)
+      ! Verify exponential decay coefficient calculation for leaf Vcmax with height/LAI.
+      class(TestLeafBiophysics), intent(inout) :: this
+      real(r8) :: decay
+
+      ! 50.0 (cai), 0.009 (decay), 0.12 (offset) represent typical mid-canopy C3 values and default parameters.
+      decay = DecayCoeffVcmax(50.0_r8, 0.009_r8, 0.12_r8)
+      @assertEqual(1.39096812838_r8, decay, tolerance=1.e-7_r8)
+
+      ! Inputs chosen to yield an exact zero exponent (0.1 * 10.0 - 1.0 = 0.0) to test base scaling.
+      decay = DecayCoeffVcmax(10.0_r8, 0.1_r8, 1.0_r8)
+      @assertEqual(1.0_r8, decay, tolerance=tol)
+    end subroutine test_DecayCoeffVcmax
+
+    @Test
+    subroutine test_GetConstrainedVPress(this)
+      ! Verify vapor pressure constraints are correctly applied within the 5% minimum and 100% maximum bounds.
+      class(TestLeafBiophysics), intent(inout) :: this
+      real(r8) :: ceair
+
+      ! Saturation vapor pressure 3000.0 Pa represents a leaf at standard warm conditions (~24 C).
+      ! Vapor pressure 1000.0 Pa lies inside the allowed bounds of [150.0, 3000.0] Pa.
+      ceair = GetConstrainedVPress(1000.0_r8, 3000.0_r8)
+      @assertEqual(1000.0_r8, ceair, tolerance=tol)
+
+      ! Vapor pressure 100.0 Pa is below the 5% minimum limit of 150.0 Pa to trigger capping.
+      ceair = GetConstrainedVPress(100.0_r8, 3000.0_r8)
+      @assertEqual(150.0_r8, ceair, tolerance=tol)
+
+      ! Vapor pressure 3500.0 Pa is above the 100% saturation limit of 3000.0 Pa to trigger capping.
+      ceair = GetConstrainedVPress(3500.0_r8, 3000.0_r8)
+      @assertEqual(3000.0_r8, ceair, tolerance=tol)
+    end subroutine test_GetConstrainedVPress
+
+    @Test
+    subroutine test_VeloToMolarCF(this)
+      ! Verify conversion factor between boundary layer velocity (m/s) and molar flux (umol/m2/s/Pa).
+      class(TestLeafBiophysics), intent(inout) :: this
+      real(r8) :: cf
+
+      ! Standard sea-level pressure (101325.0 Pa) and 25 C (298.15 K) to test default conversion.
+      cf = VeloToMolarCF(101325.0_r8, 298.15_r8)
+      @assertEqual(40874058.377671719_r8, cf, tolerance=1.e-4_r8)
+
+      ! Reference pressure (100000.0 Pa) and 0 C freezing boundary (273.15 K) to test thermal range.
+      cf = VeloToMolarCF(100000.0_r8, 273.15_r8)
+      @assertEqual(44031629.437512256_r8, cf, tolerance=1.e-4_r8)
+    end subroutine test_VeloToMolarCF
 
 end module test_LeafBiophysics
