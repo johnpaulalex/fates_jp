@@ -11,9 +11,14 @@ module test_LeafBiophysics
                                 LeafLayerMaintenanceRespiration_Ryan_1991, &
                                 LeafLayerMaintenanceRespiration_Atkin_etal_2017, &
                                 GetCanopyGasParameters, &
+                                AgrossRubiscoC3, &
+                                AgrossRuBPC3, &
+                                AgrossRuBPC4, &
+                                AgrossPEPC4, &
                                 lb_params, &
                                 c3_path_index, &
-                                c4_path_index
+                                c4_path_index, &
+                                FvCB1980
   use funit
 
   implicit none
@@ -63,6 +68,9 @@ module test_LeafBiophysics
       ! Non-default (FATES default=1.0); 0.8 gives non-trivial hand-calculable values.
       lb_params%maintresp_reduction_intercept(1) = 0.8_r8
       lb_params%maintresp_reduction_intercept(2) = 0.8_r8
+
+      ! Required for GetJe in AgrossRuBPC3
+      lb_params%electron_transport_model = FvCB1980
     end subroutine setUp
 
     subroutine tearDown(this)
@@ -267,5 +275,84 @@ module test_LeafBiophysics
       @assertEqual(1.0_r8, mm_ko2, tolerance=tol)
       @assertEqual(1.0_r8, co2_cpoint, tolerance=tol)
     end subroutine test_GetCanopyGasParameters
+
+    @Test
+    subroutine test_AgrossRubiscoC3(this)
+      class(TestLeafBiophysics), intent(inout) :: this
+      real(r8) :: vcmax, ci, can_o2_ppress, co2_cpoint, mm_kco2, mm_ko2, ac
+      
+      vcmax = 50.0_r8
+      ci = 30.0_r8
+      can_o2_ppress = 20900.0_r8
+      co2_cpoint = 4.0_r8
+      mm_kco2 = 30.0_r8
+      mm_ko2 = 30000.0_r8
+      
+      ! ac = 50 * max(30 - 4, 0) / (30 + 30 * (1 + 20900 / 30000))
+      ! ac = 1300 / (30 + 30 * 1.6966666667)
+      ! ac = 1300 / 80.9 ~ 16.0692212608
+      ac = AgrossRubiscoC3(vcmax, ci, can_o2_ppress, co2_cpoint, mm_kco2, mm_ko2)
+      @assertEqual(16.0692212608_r8, ac, tolerance=1.e-6_r8)
+      
+      ! Test zero assimilation when ci <= co2_cpoint
+      ci = 2.0_r8
+      ac = AgrossRubiscoC3(vcmax, ci, can_o2_ppress, co2_cpoint, mm_kco2, mm_ko2)
+      @assertEqual(0.0_r8, ac, tolerance=tol)
+    end subroutine test_AgrossRubiscoC3
+
+    @Test
+    subroutine test_AgrossRuBPC3(this)
+      class(TestLeafBiophysics), intent(inout) :: this
+      real(r8) :: par_abs, jmax, fnps, ci, co2_cpoint, aj
+      
+      par_abs = 1000.0_r8
+      jmax = 100.0_r8
+      fnps = 0.15_r8
+      ci = 30.0_r8
+      co2_cpoint = 4.0_r8
+      
+      ! jpar = 1000 * 0.5 * 0.85 = 425
+      ! je root of: 0.7 * x^2 - 525 * x + 42500 = 0
+      ! je ~ 92.31516793
+      ! aj = 92.31516793 * (30 - 4) / (4 * 30 + 8 * 4)
+      ! aj = 2400.194366 / 152 ~ 15.790752409
+      aj = AgrossRuBPC3(par_abs, jmax, fnps, ci, co2_cpoint)
+      @assertEqual(15.790752409_r8, aj, tolerance=1.e-6_r8)
+      
+      ! Test zero assimilation when ci <= co2_cpoint
+      ci = 2.0_r8
+      aj = AgrossRuBPC3(par_abs, jmax, fnps, ci, co2_cpoint)
+      @assertEqual(0.0_r8, aj, tolerance=tol)
+    end subroutine test_AgrossRuBPC3
+
+    @Test
+    subroutine test_AgrossRuBPC4(this)
+      class(TestLeafBiophysics), intent(inout) :: this
+      real(r8) :: par_abs, aj
+      
+      par_abs = 1000.0_r8
+      ! aj = 0.05 * 1000 = 50
+      aj = AgrossRuBPC4(par_abs)
+      @assertEqual(50.0_r8, aj, tolerance=tol)
+    end subroutine test_AgrossRuBPC4
+
+    @Test
+    subroutine test_AgrossPEPC4(this)
+      class(TestLeafBiophysics), intent(inout) :: this
+      real(r8) :: ci, kp, can_press, ap
+      
+      ci = 30.0_r8
+      kp = 0.7_r8
+      can_press = 100000.0_r8
+      
+      ! ap = 0.7 * 30 / 100000 = 0.00021
+      ap = AgrossPEPC4(ci, kp, can_press)
+      @assertEqual(0.00021_r8, ap, tolerance=tol)
+      
+      ! Test zero assimilation when ci <= 0
+      ci = -5.0_r8
+      ap = AgrossPEPC4(ci, kp, can_press)
+      @assertEqual(0.0_r8, ap, tolerance=tol)
+    end subroutine test_AgrossPEPC4
 
 end module test_LeafBiophysics
