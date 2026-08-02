@@ -13,18 +13,9 @@ module test_FatesPlantRespPhotosynth
   @TestCase
   type, extends(TestCase) :: TestFatesPlantRespPhotosynth
   contains
-    procedure :: setUp
-    procedure :: tearDown
   end type TestFatesPlantRespPhotosynth
 
   contains
-    subroutine setUp(this)
-      class(TestFatesPlantRespPhotosynth), intent(inout) :: this
-    end subroutine setUp
-
-    subroutine tearDown(this)
-      class(TestFatesPlantRespPhotosynth), intent(inout) :: this
-    end subroutine tearDown
 
     @Test
     subroutine test_FatesPlantRespPhotosynthDrive_empty(this)
@@ -37,6 +28,7 @@ module test_FatesPlantRespPhotosynth
 
       sites(1)%oldest_patch => null()
       call FatesPlantRespPhotosynthDrive(nsites, sites, bc_in, bc_out, dtime)
+      ! Verify that calling the subroutine with an empty patch list gracefully short-circuits without crashing
       @assertTrue(.true.)
     end subroutine test_FatesPlantRespPhotosynthDrive_empty
 
@@ -57,6 +49,7 @@ module test_FatesPlantRespPhotosynth
       sites(1)%oldest_patch => patch
 
       call FatesPlantRespPhotosynthDrive(nsites, sites, bc_in, bc_out, dtime)
+      ! Verify that calling the subroutine on a bareground patch gracefully short-circuits without crashing
       @assertTrue(.true.)
 
       deallocate(patch)
