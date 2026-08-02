@@ -14,18 +14,9 @@ module test_EDAccumulateFluxes
   @TestCase
   type, extends(TestCase) :: TestEDAccumulateFluxes
   contains
-    procedure :: setUp
-    procedure :: tearDown
   end type TestEDAccumulateFluxes
 
   contains
-    subroutine setUp(this)
-      class(TestEDAccumulateFluxes), intent(inout) :: this
-    end subroutine setUp
-
-    subroutine tearDown(this)
-      class(TestEDAccumulateFluxes), intent(inout) :: this
-    end subroutine tearDown
 
     @Test
     subroutine test_AccumulateFluxes_ED_Normal(this)
