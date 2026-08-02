@@ -11,18 +11,9 @@ module test_FatesHydroWTF
   @TestCase
   type, extends(TestCase) :: TestFatesHydroWTF
   contains
-    procedure :: setUp
-    procedure :: tearDown
   end type TestFatesHydroWTF
 
   contains
-    subroutine setUp(this)
-      class(TestFatesHydroWTF), intent(inout) :: this
-    end subroutine setUp
-
-    subroutine tearDown(this)
-      class(TestFatesHydroWTF), intent(inout) :: this
-    end subroutine tearDown
 
     @Test
     subroutine test_get_thsat(this)
@@ -107,23 +98,28 @@ module test_FatesHydroWTF
       type(wrf_type_vg) :: vg_obj
       real(r8) :: th_res, th_sat
       real(r8) :: exp_th_min, exp_th_max
+      real(r8) :: alpha, n_vg, m_vg
+      real(r8) :: Se_max, Se_min, exp_dpsidth_max, exp_dpsidth_min
       real(r8), parameter :: tol = 1.0e-6_r8
       
       ! Parameters needed for van Genuchten (VG) model to successfully setup
       ! params = [alpha, n_vg, m_vg, th_sat, th_res]
       real(r8) :: params(5)
 
-      params(1) = 0.5_r8  ! alpha
-      params(2) = 1.5_r8  ! n_vg
-      params(3) = 0.5_r8  ! m_vg
-      params(4) = 0.5_r8  ! th_sat
-      params(5) = 0.1_r8  ! th_res
+      alpha = 0.5_r8
+      n_vg = 1.5_r8
+      m_vg = 0.5_r8
+      th_sat = 0.5_r8
+      th_res = 0.1_r8
+
+      params(1) = alpha
+      params(2) = n_vg
+      params(3) = m_vg
+      params(4) = th_sat
+      params(5) = th_res
       
       ! set_wrf_param_vg calls set_min_max_from_satres internally
       call vg_obj%set_wrf_param(params)
-
-      th_sat = 0.5_r8
-      th_res = 0.1_r8
 
       ! In FatesHydroWTFMod.F90, boundaries for interpolation are defined as:
       ! min_sf_interp = 0.01 (1% above residual)
@@ -136,9 +132,21 @@ module test_FatesHydroWTF
       @assertEqual(exp_th_max, vg_obj%th_max, tolerance=tol)
       @assertEqual(exp_th_min, vg_obj%th_min, tolerance=tol)
       
-      ! Also verify that dpsidth_min and dpsidth_max were computed and are not zero
-      @assertTrue(vg_obj%dpsidth_max > 0.0_r8)
-      @assertTrue(vg_obj%dpsidth_min > 0.0_r8)
+      ! Mathematically compute exact expectation for derivative using the VG closed form:
+      ! dpsi/dth = (1 / (alpha * m_vg * n_vg * (th_sat - th_res))) * (Se**(-1/m_vg - 1)) * ((Se**(-1/m_vg) - 1)**(1/n_vg - 1))
+      Se_max = 0.998_r8
+      Se_min = 0.01_r8
+      
+      exp_dpsidth_max = (1.0_r8 / (alpha * m_vg * n_vg * (th_sat - th_res))) * &
+                        (Se_max**(-1.0_r8/m_vg - 1.0_r8)) * &
+                        ((Se_max**(-1.0_r8/m_vg) - 1.0_r8)**(1.0_r8/n_vg - 1.0_r8))
+                        
+      exp_dpsidth_min = (1.0_r8 / (alpha * m_vg * n_vg * (th_sat - th_res))) * &
+                        (Se_min**(-1.0_r8/m_vg - 1.0_r8)) * &
+                        ((Se_min**(-1.0_r8/m_vg) - 1.0_r8)**(1.0_r8/n_vg - 1.0_r8))
+
+      @assertEqual(exp_dpsidth_max, vg_obj%dpsidth_max, tolerance=tol)
+      @assertEqual(exp_dpsidth_min, vg_obj%dpsidth_min, tolerance=tol)
 
     end subroutine test_set_min_max_from_satres
 
