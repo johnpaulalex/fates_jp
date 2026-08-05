@@ -1,0 +1,99 @@
+!> This module contains unit tests for the FatesPlantRespPhotosynthMod production module,
+!> which calculates plant respiration and photosynthesis rates, taking into account
+!> environmental conditions and patch-level properties.
+module test_FatesPlantRespPhotosynth
+  use FatesConstantsMod, only : r8 => fates_r8, nocomp_bareground
+  use EDTypesMod, only : ed_site_type
+  use FatesPatchMod, only : fates_patch_type
+  use FatesInterfaceTypesMod, only : bc_in_type, bc_out_type
+  use FatesPlantRespPhotosynthMod, only : FatesPlantRespPhotosynthDrive
+  use funit
+  implicit none
+
+  @TestCase
+  type, extends(TestCase) :: TestFatesPlantRespPhotosynth
+  contains
+  end type TestFatesPlantRespPhotosynth
+
+  contains
+
+    @Test
+    subroutine test_FatesPlantRespPhotosynthDrive_empty(this)
+      class(TestFatesPlantRespPhotosynth), intent(inout) :: this
+      integer, parameter :: nsites = 1
+      type(ed_site_type), target :: sites(nsites)
+      type(bc_in_type) :: bc_in(nsites)
+      type(bc_out_type) :: bc_out(nsites)
+      real(r8) :: dtime = 3600.0_r8
+
+      sites(1)%oldest_patch => null()
+      call FatesPlantRespPhotosynthDrive(nsites, sites, bc_in, bc_out, dtime)
+      ! Verify that calling the subroutine with an empty patch list gracefully short-circuits without crashing
+      @assertTrue(.true.)
+    end subroutine test_FatesPlantRespPhotosynthDrive_empty
+
+    @Test
+    subroutine test_FatesPlantRespPhotosynthDrive_bareground(this)
+      class(TestFatesPlantRespPhotosynth), intent(inout) :: this
+      integer, parameter :: nsites = 1
+      type(ed_site_type), target :: sites(nsites)
+      type(bc_in_type) :: bc_in(nsites)
+      type(bc_out_type) :: bc_out(nsites)
+      type(fates_patch_type), pointer :: patch
+      real(r8) :: dtime = 3600.0_r8
+
+      allocate(patch)
+      patch%patchno = 1
+      patch%nocomp_pft_label = nocomp_bareground
+      patch%younger => null()
+      sites(1)%oldest_patch => patch
+
+      call FatesPlantRespPhotosynthDrive(nsites, sites, bc_in, bc_out, dtime)
+      ! Verify that calling the subroutine on a bareground patch gracefully short-circuits without crashing
+      @assertTrue(.true.)
+
+      deallocate(patch)
+    end subroutine test_FatesPlantRespPhotosynthDrive_bareground
+
+    @Test
+    subroutine test_FatesPlantRespPhotosynthDrive_skip(this)
+      class(TestFatesPlantRespPhotosynth), intent(inout) :: this
+      integer, parameter :: nsites = 1
+      type(ed_site_type), target :: sites(nsites)
+      type(bc_in_type) :: bc_in(nsites)
+      type(bc_out_type) :: bc_out(nsites)
+      type(fates_patch_type), pointer :: patch
+      real(r8) :: dtime = 3600.0_r8
+
+      allocate(patch)
+      patch%patchno = 1
+      patch%nocomp_pft_label = 1  ! Not bareground
+      patch%NCL_p = 1
+      patch%younger => null()
+      sites(1)%oldest_patch => patch
+
+      ! Setting filter_photo_pa(1) = 1 flags that photosynthesis calculations
+      ! should be skipped for this patch (e.g., during night time or very low light).
+      allocate(bc_in(1)%filter_photo_pa(1))
+      bc_in(1)%filter_photo_pa(1) = 1 ! Skip photo
+
+      ! Initialize stomatal resistance outputs (rssun_pa and rssha_pa) to a non-zero mock value (99.0)
+      ! to verify that the skip logic properly resets them to 0.0 when photosynthesis is skipped.
+      allocate(bc_out(1)%rssun_pa(1))
+      allocate(bc_out(1)%rssha_pa(1))
+      bc_out(1)%rssun_pa(1) = 99.0_r8
+      bc_out(1)%rssha_pa(1) = 99.0_r8
+
+      call FatesPlantRespPhotosynthDrive(nsites, sites, bc_in, bc_out, dtime)
+      
+      ! Verify the arrays were zeroed out which indicates the block was entered
+      @assertEqual(0._r8, bc_out(1)%rssun_pa(1))
+      @assertEqual(0._r8, bc_out(1)%rssha_pa(1))
+
+      deallocate(bc_in(1)%filter_photo_pa)
+      deallocate(bc_out(1)%rssun_pa)
+      deallocate(bc_out(1)%rssha_pa)
+      deallocate(patch)
+    end subroutine test_FatesPlantRespPhotosynthDrive_skip
+
+end module test_FatesPlantRespPhotosynth
