@@ -3,7 +3,9 @@ module test_LeafBiophysics
   ! DESCRIPTION:
   !   Unit tests for LeafBiophysicsMod routines in FATES.
   !
-  use FatesConstantsMod, only : r8 => fates_r8, tfrz => t_water_freeze_k_1atm
+  use FatesConstantsMod, only : r8 => fates_r8, tfrz => t_water_freeze_k_1atm, &
+                                molar_mass_water, rgas_J_K_mol, &
+                                molar_mass_ratio_vapdry, nearzero, itrue
   use LeafBiophysicsMod, only : QSat, &
                                 StomatalCondMedlyn, &
                                 StomatalCondBallBerry, &
@@ -14,7 +16,17 @@ module test_LeafBiophysics
                                 DecayCoeffVcmax, &
                                 GetConstrainedVPress, &
                                 VeloToMolarCF, &
-                                LeafHumidityStomaResis, &
+                                LeafLayerBiophysicalRates, &
+                                LeafLayerPhotosynthesis, &
+                                btran_on_gs_none, &
+                                btran_on_gs_gs0, &
+                                btran_on_gs_gs1, &
+                                btran_on_gs_gs2, &
+                                btran_on_gs_gs01, &
+                                btran_on_gs_gs02, &
+                                btran_on_ag_none, &
+                                btran_on_ag_vcmax, &
+                                btran_on_ag_vcmax_jmax, &
                                 rsmax0, &
                                 lb_params, &
                                 c3_path_index, &
@@ -45,6 +57,18 @@ module test_LeafBiophysics
       allocate(lb_params%maintresp_leaf_atkin2017_baserate(2))
       allocate(lb_params%maintresp_reduction_curvature(2))
       allocate(lb_params%maintresp_reduction_intercept(2))
+      allocate(lb_params%vcmaxha(2))
+      allocate(lb_params%jmaxha(2))
+      allocate(lb_params%vcmaxhd(2))
+      allocate(lb_params%jmaxhd(2))
+      allocate(lb_params%vcmaxse(2))
+      allocate(lb_params%jmaxse(2))
+      allocate(lb_params%stomatal_intercept(2))
+      allocate(lb_params%medlyn_slope(2))
+      allocate(lb_params%bb_slope(2))
+      allocate(lb_params%stomatal_btran_model(2))
+      allocate(lb_params%agross_btran_model(2))
+      allocate(lb_params%fnps(2))
 
       ! Pathway flags; module-level constants from LeafBiophysicsMod.
       lb_params%c3psn(1) = c3_path_index
@@ -67,6 +91,28 @@ module test_LeafBiophysics
       ! Non-default (FATES default=1.0); 0.8 gives non-trivial hand-calculable values.
       lb_params%maintresp_reduction_intercept(1) = 0.8_r8
       lb_params%maintresp_reduction_intercept(2) = 0.8_r8
+
+      ! Set standard parameters for LeafLayerBiophysicalRates and LeafLayerPhotosynthesis.
+      lb_params%dayl_switch = 0 ! 0 disables daylength factor scaling
+      lb_params%photo_tempsens_model = 0 ! 0 is photosynth_acclim_model_none
+      lb_params%electron_transport_model = 1 ! 1 is Farquhar-von Caemmerer-Berry (FvCB 1980)
+      lb_params%stomatal_model = 2 ! 2 is Medlyn stomatal conductance model
+      lb_params%stomatal_assim_model = 1 ! 1 is net photosynthesis assimilation model
+
+      ! Typical values for activation, deactivation energies, and entropy.
+      lb_params%vcmaxha(:) = 65330.0_r8 ! 65330.0 J/mol is default C3 vcmax activation energy
+      lb_params%jmaxha(:) = 43540_r8    ! 43540.0 J/mol is default C3 jmax activation energy
+      lb_params%vcmaxhd(:) = 200000_r8  ! 200000.0 J/mol is default C3 vcmax deactivation energy
+      lb_params%jmaxhd(:) = 200000_r8   ! 200000.0 J/mol is default C3 jmax deactivation energy
+      lb_params%vcmaxse(:) = 641_r8     ! 641.0 J/mol/K is default C3 vcmax entropy
+      lb_params%jmaxse(:) = 641_r8      ! 641.0 J/mol/K is default C3 jmax entropy
+
+      lb_params%stomatal_intercept(:) = 10000.0_r8 ! 10000.0 umol/m2/s intercept g0
+      lb_params%medlyn_slope(:) = 5.0_r8          ! 5.0 Medlyn slope g1
+      lb_params%bb_slope(:) = 9.0_r8              ! 9.0 Ball-Berry slope g1
+      lb_params%stomatal_btran_model(:) = btran_on_gs_none ! no btran on gs0 or gs1
+      lb_params%agross_btran_model(:) = btran_on_ag_none   ! no btran on vcmax or jmax
+      lb_params%fnps(:) = 0.15_r8                  ! 0.15 default fraction of light absorbed by non-photosynthetic pigments
     end subroutine setUp
 
     subroutine tearDown(this)
@@ -76,6 +122,201 @@ module test_LeafBiophysics
       deallocate(lb_params%maintresp_leaf_atkin2017_baserate)
       deallocate(lb_params%maintresp_reduction_curvature)
       deallocate(lb_params%maintresp_reduction_intercept)
-    end subroutine tearDown
+      deallocate(lb_params%vcmaxha)
+      deallocate(lb_params%jmaxha)
+      deallocate(lb_params%vcmaxhd)
+      deallocate(lb_params%jmaxhd)
+      deallocate(lb_params%vcmaxse)
+      deallocate(lb_params%jmaxse)
+      deallocate(lb_params%stomatal_intercept)
+      deallocate(lb_params%medlyn_slope)
+      deallocate(lb_params%bb_slope)
+      deallocate(lb_params%stomatal_btran_model)
+      deallocate(lb_params%agross_btran_model)
+      deallocate(lb_params%fnps)
+    end subroutine tearDown    @Test
+    subroutine test_LeafLayerBiophysicalRates(this)
+      ! Verify biophysical rates (Vcmax, Jmax, Kp, and stomatal parameters) scale correctly with temperature and btran.
+      class(TestLeafBiophysics), intent(inout) :: this
+      real(r8) :: vcmax, jmax, kp, gs0, gs1, gs2
+      real(r8) :: vcmax25top_ft, jmax25top_ft, kp25_ft, nscaler, veg_tempk, dayl_factor, t_growth, t_home, btran
+      integer :: ft
+
+      ! Case 1: PFT 1 (C3) standard rates calculation under 25C and no water limitation (btran = 1.0)
+      ! 50.0_r8: Canopy top maximum rate of carboxylation at 25C (umol CO2/m2/s).
+      ! 100.0_r8: Canopy top maximum electron transport rate at 25C (umol electrons/m2/s).
+      ! -9999.0_r8: Unused initial slope of CO2 response curve for C3.
+      ! 1.0_r8: Scale for leaf nitrogen profile (top leaf layer).
+      ! 298.15_r8: Standard leaf temperature of 25 C (K).
+      ! 1.0_r8: Daylength factor scaling (maximum).
+      ! 1.0_r8: Transpiration wetness factor (no water stress).
+      ft = 1
+      vcmax25top_ft = 50.0_r8
+      jmax25top_ft = 100.0_r8
+      kp25_ft = -9999.0_r8
+      nscaler = 1.0_r8
+      veg_tempk = 298.15_r8
+      dayl_factor = 1.0_r8
+      t_growth = 298.15_r8
+      t_home = 298.15_r8
+      btran = 1.0_r8
+
+      call LeafLayerBiophysicalRates(ft, vcmax25top_ft, jmax25top_ft, kp25_ft, nscaler, &
+           veg_tempk, dayl_factor, t_growth, t_home, btran, vcmax, jmax, kp, gs0, gs1, gs2)
+
+      ! Expect baseline values at 25C: vcmax = 50.0, jmax = 100.0, kp = -9999.0.
+      @assertEqual(50.0_r8, vcmax, tolerance=tol)
+      @assertEqual(100.0_r8, jmax, tolerance=tol)
+      @assertEqual(-9999.0_r8, kp, tolerance=tol)
+      ! gs0 = max(gsmin0, 10000.0) = 10000.0. medlyn_slope(1) = 5.0. gs2 = 1.0.
+      @assertEqual(10000.0_r8, gs0, tolerance=tol)
+      @assertEqual(5.0_r8, gs1, tolerance=tol)
+      @assertEqual(1.0_r8, gs2, tolerance=tol)
+
+      ! Case 2: PFT 2 (C4) standard rates calculation under 25C
+      ! 30.0_r8: Canopy top maximum rate of carboxylation at 25C (umol CO2/m2/s).
+      ! 60.0_r8: Canopy top maximum electron transport rate at 25C (umol electrons/m2/s).
+      ! 0.7_r8: Initial slope of CO2 response curve at 25C for C4.
+      ft = 2
+      vcmax25top_ft = 30.0_r8
+      jmax25top_ft = 60.0_r8
+      kp25_ft = 0.7_r8
+
+      call LeafLayerBiophysicalRates(ft, vcmax25top_ft, jmax25top_ft, kp25_ft, nscaler, &
+           veg_tempk, dayl_factor, t_growth, t_home, btran, vcmax, jmax, kp, gs0, gs1, gs2)
+
+      ! Hand-calculated C4 vcmax at 25C: 30.0 / (1.135335 * 1.011109) = 30.0 / 1.147948 ~ 26.13359 umol/m2/s.
+      ! expected C4 vcmax: 26.133592_r8; 1.e-5_r8: precision tolerance.
+      @assertEqual(26.133592_r8, vcmax, tolerance=1.e-5_r8)
+      ! kp = kp25_ft * 1.0 * 2.0^0 = 0.7.
+      @assertEqual(0.7_r8, kp, tolerance=tol)
+
+      ! Case 3: Kumarathunge temperature acclimation model (model index 1)
+      ! 1: Switch photo_tempsens_model to Kumarathunge et al. 2019 acclimation.
+      lb_params%photo_tempsens_model = 1
+      ft = 1
+      vcmax25top_ft = 50.0_r8
+      jmax25top_ft = 100.0_r8
+      kp25_ft = -9999.0_r8
+
+      call LeafLayerBiophysicalRates(ft, vcmax25top_ft, jmax25top_ft, kp25_ft, nscaler, &
+           veg_tempk, dayl_factor, t_growth, t_home, btran, vcmax, jmax, kp, gs0, gs1, gs2)
+
+      ! Verify that vcmax and jmax converge to positive, realistic values.
+      @assertTrue(vcmax > 0.0_r8)
+      @assertTrue(jmax > 0.0_r8)
+
+      ! Reset temperature sensitivity model back to none (0).
+      lb_params%photo_tempsens_model = 0
+
+      ! Case 4: Water limitation scaling using btran
+      ! 2: btran_on_ag_vcmax_jmax scales both vcmax and jmax.
+      ! 3: btran_on_gs_gs01 scales both stomatal intercept and slope.
+      ! 0.5_r8: Moderate soil moisture stress factor (50% reduction).
+      lb_params%agross_btran_model(1) = btran_on_ag_vcmax_jmax
+      lb_params%stomatal_btran_model(1) = btran_on_gs_gs01
+      btran = 0.5_r8
+
+      call LeafLayerBiophysicalRates(1, 50.0_r8, 100.0_r8, -9999.0_r8, 1.0_r8, &
+           298.15_r8, 1.0_r8, 298.15_r8, 298.15_r8, btran, vcmax, jmax, kp, gs0, gs1, gs2)
+
+      ! Verify scaled values: vcmax = 25.0, jmax = 50.0.
+      @assertEqual(25.0_r8, vcmax, tolerance=tol)
+      @assertEqual(50.0_r8, jmax, tolerance=tol)
+      ! gs0 = max(gsmin0, 10000 * 0.5) = 5000.0. gs1 = 5.0 * 0.5 = 2.5.
+      @assertEqual(5000.0_r8, gs0, tolerance=tol)
+      @assertEqual(2.5_r8, gs1, tolerance=tol)
+
+      ! Reset models back to default.
+      lb_params%agross_btran_model(1) = btran_on_ag_none
+      lb_params%stomatal_btran_model(1) = btran_on_gs_none
+    end subroutine test_LeafLayerBiophysicalRates
+
+    @Test
+    subroutine test_LeafLayerPhotosynthesis(this)
+      ! Verify leaf layer photosynthesis orchestration for trivial (dark) and non-trivial (light) conditions for C3/C4.
+      class(TestLeafBiophysics), intent(inout) :: this
+      real(r8) :: par_abs, vcmax, jmax, kp, gs0, gs1, gs2, veg_tempk, can_press, can_co2_ppress, can_o2_ppress
+      real(r8) :: veg_esat, gb, can_vpress, mm_kco2, mm_ko2, co2_cpoint, lmr, ci_tol
+      real(r8) :: agross, gs, anet, c13disc, ci
+      integer :: ft, solve_iter
+
+      ! Standard C3 leaf conditions at sea-level and 25 C.
+      ft = 1                     ! PFT index 1 = C3 plant
+      vcmax = 50.0_r8            ! maximum carboxylation rate at 25 C; typical temperate C3 (umol CO2/m2/s)
+      jmax = 100.0_r8            ! maximum electron transport rate at 25 C; ~2x vcmax by default (umol e-/m2/s)
+      kp = -9999.0_r8            ! PEP carboxylation slope unused for C3; sentinel value
+      gs0 = 10000.0_r8           ! stomatal conductance intercept g0 (umol H2O/m2/s)
+      gs1 = 5.0_r8               ! Medlyn slope g1; typical broadleaf C3 value
+      gs2 = 1.0_r8               ! btran scalar on non-intercept term; 1.0 = no soil-moisture scaling
+      veg_tempk = 298.15_r8      ! leaf temperature 25 C; reference temperature for Arrhenius scaling (K)
+      can_press = 101325.0_r8    ! standard sea-level air pressure (Pa)
+      can_co2_ppress = 40.0_r8   ! CO2 partial pressure near the leaf; ~400 ppm at 1 atm (Pa)
+      can_o2_ppress = 20900.0_r8 ! O2 partial pressure; 20.9% of standard atmosphere (Pa)
+      veg_esat = 3000.0_r8       ! leaf saturation vapor pressure at ~25 C (Pa)
+      gb = 2000000.0_r8          ! very large boundary layer conductance to minimise gb resistance (umol H2O/m2/s)
+      can_vpress = 1500.0_r8     ! canopy air vapor pressure; gives vpd = 1500 Pa (Pa)
+      mm_kco2 = 40.49_r8         ! Michaelis-Menten constant for CO2 at 25 C (Pa); from GetCanopyGasParameters
+      mm_ko2 = 27840.0_r8        ! Michaelis-Menten constant for O2 at 25 C (Pa); from GetCanopyGasParameters
+      co2_cpoint = 4.275_r8      ! CO2 compensation point at 25 C (Pa); from GetCanopyGasParameters
+      lmr = 1.5_r8               ! leaf maintenance (dark) respiration rate (umol CO2/m2/s)
+      ci_tol = 0.1_r8            ! convergence tolerance on intracellular CO2 solver (Pa)
+
+      ! Case 1: Trivial case under dark condition.
+      par_abs = 0.0_r8 ! zero absorbed PAR; triggers the dark-only short-circuit in LeafLayerPhotosynthesis
+      call LeafLayerPhotosynthesis(par_abs, ft, vcmax, jmax, kp, gs0, gs1, gs2, &
+           veg_tempk, can_press, can_co2_ppress, can_o2_ppress, veg_esat, gb, can_vpress, &
+           mm_kco2, mm_ko2, co2_cpoint, lmr, ci_tol, agross, gs, anet, c13disc, ci, solve_iter)
+
+      ! Expect net photosynthesis to equal dark respiration loss.
+      @assertEqual(-1.5_r8, anet, tolerance=tol)
+      @assertEqual(0.0_r8, agross, tolerance=tol)
+      @assertEqual(gs0, gs, tolerance=tol)
+      @assertEqual(0.0_r8, c13disc, tolerance=tol)
+      @assertEqual(0, solve_iter)
+
+      ! Case 2: Non-trivial standard C3 photosynthesis under full light.
+      par_abs = 1000.0_r8 ! full-sun absorbed PAR; saturates RuBP-limited pathway for these Vcmax/Jmax (umol photons/m2/s)
+      call LeafLayerPhotosynthesis(par_abs, ft, vcmax, jmax, kp, gs0, gs1, gs2, &
+           veg_tempk, can_press, can_co2_ppress, can_o2_ppress, veg_esat, gb, can_vpress, &
+           mm_kco2, mm_ko2, co2_cpoint, lmr, ci_tol, agross, gs, anet, c13disc, ci, solve_iter)
+
+      ! Verify convergence and valid physical outputs.
+      @assertTrue(agross > 0.0_r8)
+      @assertTrue(gs > gs0)
+      @assertEqual(agross - lmr, anet, tolerance=tol)
+      @assertTrue(ci > co2_cpoint)
+      @assertTrue(ci < can_co2_ppress)
+      @assertTrue(solve_iter > 0)
+      @assertTrue(c13disc > 0.0_r8)
+
+      ! Case 3: Non-trivial standard C4 photosynthesis
+      ! 30.0_r8: C4 Vcmax; 60.0_r8: C4 Jmax.
+      ! kp is the temperature-scaled PEP carboxylation slope (umol CO2/m2/s/Pa):
+      !   ap = kp * ci / can_press (see AgrossPEPC4).
+      ! With ci~16 Pa and can_press=101325 Pa, kp must be ~O(1e5) for ap~20 umol/m2/s.
+      ! 150000.0_r8: realistic temperature-scaled kp25 (C4 grass at ~25C).
+      ! Reset stomatal params to a physically realistic C4 value (gs0=10000 from
+      ! the C3 case is too large relative to C4 assimilation rates, causing
+      ! the slope term to be smaller than the intercept and gs <= gs0).
+      ! 2000.0_r8: C4-appropriate minimum conductance (umol H2O/m2/s).
+      ft = 2
+      vcmax = 30.0_r8
+      jmax = 60.0_r8
+      kp = 150000.0_r8
+      gs0 = 2000.0_r8
+      gs1 = 5.0_r8
+      gs2 = 1.0_r8
+      call LeafLayerPhotosynthesis(par_abs, ft, vcmax, jmax, kp, gs0, gs1, gs2, &
+           veg_tempk, can_press, can_co2_ppress, can_o2_ppress, veg_esat, gb, can_vpress, &
+           mm_kco2, mm_ko2, co2_cpoint, lmr, ci_tol, agross, gs, anet, c13disc, ci, solve_iter)
+
+      ! Verify convergence for C4.
+      @assertTrue(agross > 0.0_r8)
+      @assertTrue(gs > gs0)
+      @assertEqual(agross - lmr, anet, tolerance=tol)
+      @assertTrue(solve_iter > 0)
+      @assertTrue(c13disc > 0.0_r8)
+    end subroutine test_LeafLayerPhotosynthesis
 
 end module test_LeafBiophysics
