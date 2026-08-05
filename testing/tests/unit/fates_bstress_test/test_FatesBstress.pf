@@ -1,0 +1,379 @@
+!> This module contains unit tests for the FatesBstressMod production module,
+!> which handles calculations of salinity stress (and other soil/water stresses)
+!> on plant physiological function.
+module test_FatesBstress
+  use FatesConstantsMod, only : r8 => fates_r8
+  use EDTypesMod, only : ed_site_type
+  use FatesInterfaceTypesMod, only : bc_in_type, numpft
+  use FatesBstressMod, only : btran_sal_stress_fates
+  use FatesPatchMod, only : fates_patch_type
+  use PRTParametersMod, only : prt_params
+  use FatesUnitTestPRTParametersMod, only : init_mock_prt_params
+  use funit
+  implicit none
+
+  @TestCase
+  type, extends(TestCase) :: TestFatesBstress
+  contains
+  end type TestFatesBstress
+
+  contains
+
+    @Test
+    subroutine test_btran_sal_stress_fates(this)
+      class(TestFatesBstress), intent(inout) :: this
+      integer, parameter :: nsites = 1
+      type(ed_site_type), target :: sites(nsites)
+      type(bc_in_type) :: bc_in(nsites)
+      type(fates_patch_type), pointer :: p1
+      
+      ! Setup global module variables
+      numpft = 1
+      
+      ! Allocate and initialize patch
+      allocate(p1)
+      p1%younger => null()
+      p1%bstress_sal_ft(:) = 0.0_r8
+      sites(1)%oldest_patch => p1
+      
+      ! Allocate and initialize site variables
+      allocate(sites(1)%zi_soil(0:2))
+      sites(1)%zi_soil = [0.0_r8, 0.5_r8, 1.0_r8]
+      allocate(sites(1)%rootfrac_scr(1:2))
+      
+      ! Allocate and initialize boundary condition variables
+      bc_in(1)%nlevsoil = 2
+      bc_in(1)%max_rooting_depth_index_col = 2
+      allocate(bc_in(1)%h2o_liqvol_sl(1:2))
+      allocate(bc_in(1)%tempk_sl(1:2))
+      allocate(bc_in(1)%salinity_sl(1:2))
+      
+      ! Typical values for liquid water content [m3/m3]
+      bc_in(1)%h2o_liqvol_sl = [0.1_r8, 0.2_r8]
+      ! Typical values for soil temperature [K]
+      bc_in(1)%tempk_sl = [290.0_r8, 280.0_r8]
+      ! Arbitrary low/moderate salinity stress values [g/kg]
+      bc_in(1)%salinity_sl = [0.01_r8, 0.02_r8]
+      
+      ! Mock PRTParameters for set_root_fraction
+      ! Setting mode to 2.0 uses an exponential root profile.
+      ! The parameter 'a' (5.0) defines the shape of the root distribution curve.
+      call init_mock_prt_params()
+      prt_params%fnrt_prof_mode(1) = 2.0_r8 ! exponential_1p_profile_type
+      prt_params%fnrt_prof_a(1) = 5.0_r8
+      
+      ! Call target subroutine
+      call btran_sal_stress_fates(nsites, sites, bc_in)
+      
+      ! Check results
+      ! Ensure calculation was performed and values are > 0.
+      @assertTrue(p1%bstress_sal_ft(1) > 0.0_r8)
+      
+      ! Cleanup
+      deallocate(sites(1)%zi_soil)
+      deallocate(sites(1)%rootfrac_scr)
+      deallocate(bc_in(1)%h2o_liqvol_sl)
+      deallocate(bc_in(1)%tempk_sl)
+      deallocate(bc_in(1)%salinity_sl)
+      deallocate(p1)
+    end subroutine test_btran_sal_stress_fates
+
+    !> Verifies that salinity transpiration wetness factor rresis does not exceed 1.0 at low salinity
+    @Test
+    subroutine test_btran_sal_stress_upper_cap_limit(this)
+      class(TestFatesBstress), intent(inout) :: this
+      integer, parameter :: nsites = 1
+      type(ed_site_type), target :: sites(nsites)
+      type(bc_in_type) :: bc_in(nsites)
+      type(fates_patch_type), pointer :: p1
+
+      numpft = 1
+      allocate(p1)
+      p1%younger => null()
+      p1%bstress_sal_ft(:) = 0.0_r8
+      sites(1)%oldest_patch => p1
+
+      allocate(sites(1)%zi_soil(0:1))
+      sites(1)%zi_soil = [0.0_r8, 1.0_r8]
+      allocate(sites(1)%rootfrac_scr(1:1))
+
+      bc_in(1)%nlevsoil = 1
+      bc_in(1)%max_rooting_depth_index_col = 1
+      allocate(bc_in(1)%h2o_liqvol_sl(1:1))
+      allocate(bc_in(1)%tempk_sl(1:1))
+      allocate(bc_in(1)%salinity_sl(1:1))
+
+      bc_in(1)%h2o_liqvol_sl = [0.3_r8]
+      bc_in(1)%tempk_sl = [298.15_r8]
+      ! Negative salinity boundary [g/kg] (-0.05 ppt) to verify rresis upper bound cap of 1.0
+      bc_in(1)%salinity_sl = [-0.05_r8]
+
+      call init_mock_prt_params()
+      prt_params%fnrt_prof_mode(1) = 2.0_r8
+      prt_params%fnrt_prof_a(1) = 5.0_r8
+
+      call btran_sal_stress_fates(nsites, sites, bc_in)
+
+      ! Transpiration wetness factor must be strictly capped at 1.0
+      @assertEqual(1.0_r8, p1%bstress_sal_ft(1), 1.0e-12_r8)
+
+      deallocate(sites(1)%zi_soil)
+      deallocate(sites(1)%rootfrac_scr)
+      deallocate(bc_in(1)%h2o_liqvol_sl)
+      deallocate(bc_in(1)%tempk_sl)
+      deallocate(bc_in(1)%salinity_sl)
+      deallocate(p1)
+    end subroutine test_btran_sal_stress_upper_cap_limit
+
+    !> Verifies that transpiration wetness factor rresis decreases under high salinity (0.5 ppt)
+    @Test
+    subroutine test_btran_sal_stress_high_salinity_decay(this)
+      class(TestFatesBstress), intent(inout) :: this
+      integer, parameter :: nsites = 1
+      type(ed_site_type), target :: sites(nsites)
+      type(bc_in_type) :: bc_in(nsites)
+      type(fates_patch_type), pointer :: p1
+
+      numpft = 1
+      allocate(p1)
+      p1%younger => null()
+      p1%bstress_sal_ft(:) = 0.0_r8
+      sites(1)%oldest_patch => p1
+
+      allocate(sites(1)%zi_soil(0:1))
+      sites(1)%zi_soil = [0.0_r8, 1.0_r8]
+      allocate(sites(1)%rootfrac_scr(1:1))
+
+      bc_in(1)%nlevsoil = 1
+      bc_in(1)%max_rooting_depth_index_col = 1
+      allocate(bc_in(1)%h2o_liqvol_sl(1:1))
+      allocate(bc_in(1)%tempk_sl(1:1))
+      allocate(bc_in(1)%salinity_sl(1:1))
+
+      bc_in(1)%h2o_liqvol_sl = [0.3_r8]
+      bc_in(1)%tempk_sl = [298.15_r8]
+      ! High salinity concentration [g/kg] (0.5 ppt) to verify logistic transpiration decay
+      bc_in(1)%salinity_sl = [0.5_r8]
+
+      call init_mock_prt_params()
+      prt_params%fnrt_prof_mode(1) = 2.0_r8
+      prt_params%fnrt_prof_a(1) = 5.0_r8
+
+      call btran_sal_stress_fates(nsites, sites, bc_in)
+
+      ! Verify exact analytical transpiration stress reduction under high salinity
+      @assertEqual(0.1054969155441173_r8, p1%bstress_sal_ft(1), 1.0e-10_r8)
+
+      deallocate(sites(1)%zi_soil)
+      deallocate(sites(1)%rootfrac_scr)
+      deallocate(bc_in(1)%h2o_liqvol_sl)
+      deallocate(bc_in(1)%tempk_sl)
+      deallocate(bc_in(1)%salinity_sl)
+      deallocate(p1)
+    end subroutine test_btran_sal_stress_high_salinity_decay
+
+    !> Verifies that sub-freezing soil layers (T < T_frz) contribute zero to salinity transpiration stress
+    @Test
+    subroutine test_btran_sal_stress_frozen_soil_ignored(this)
+      class(TestFatesBstress), intent(inout) :: this
+      integer, parameter :: nsites = 1
+      type(ed_site_type), target :: sites(nsites)
+      type(bc_in_type) :: bc_in(nsites)
+      type(fates_patch_type), pointer :: p1
+
+      numpft = 1
+      allocate(p1)
+      p1%younger => null()
+      p1%bstress_sal_ft(:) = 0.0_r8
+      sites(1)%oldest_patch => p1
+
+      allocate(sites(1)%zi_soil(0:1))
+      sites(1)%zi_soil = [0.0_r8, 1.0_r8]
+      allocate(sites(1)%rootfrac_scr(1:1))
+
+      bc_in(1)%nlevsoil = 1
+      bc_in(1)%max_rooting_depth_index_col = 1
+      allocate(bc_in(1)%h2o_liqvol_sl(1:1))
+      allocate(bc_in(1)%tempk_sl(1:1))
+      allocate(bc_in(1)%salinity_sl(1:1))
+
+      bc_in(1)%h2o_liqvol_sl = [0.3_r8]
+      ! Soil temperature [K] below freezing (265 K) to test check_layer_water exclusion
+      bc_in(1)%tempk_sl = [265.0_r8]
+      bc_in(1)%salinity_sl = [0.01_r8]
+
+      call init_mock_prt_params()
+      prt_params%fnrt_prof_mode(1) = 2.0_r8
+      prt_params%fnrt_prof_a(1) = 5.0_r8
+
+      call btran_sal_stress_fates(nsites, sites, bc_in)
+
+      ! Sub-freezing soil layer must contribute exactly 0.0 to transpiration wetness factor
+      @assertEqual(0.0_r8, p1%bstress_sal_ft(1), 1.0e-12_r8)
+
+      deallocate(sites(1)%zi_soil)
+      deallocate(sites(1)%rootfrac_scr)
+      deallocate(bc_in(1)%h2o_liqvol_sl)
+      deallocate(bc_in(1)%tempk_sl)
+      deallocate(bc_in(1)%salinity_sl)
+      deallocate(p1)
+    end subroutine test_btran_sal_stress_frozen_soil_ignored
+
+    !> Verifies that btran_sal_stress_fates traverses all patches in a site linked list (p1 -> p2)
+    @Test
+    subroutine test_btran_sal_stress_multi_patch_traversal(this)
+      class(TestFatesBstress), intent(inout) :: this
+      integer, parameter :: nsites = 1
+      type(ed_site_type), target :: sites(nsites)
+      type(bc_in_type) :: bc_in(nsites)
+      type(fates_patch_type), pointer :: p1, p2
+
+      numpft = 1
+      ! Two patches in linked list (p1 -> p2) to verify full patch hierarchy traversal
+      allocate(p1)
+      allocate(p2)
+      p1%bstress_sal_ft(:) = 0.0_r8
+      p2%bstress_sal_ft(:) = 0.0_r8
+      p1%younger => p2
+      p2%younger => null()
+      sites(1)%oldest_patch => p1
+
+      allocate(sites(1)%zi_soil(0:1))
+      sites(1)%zi_soil = [0.0_r8, 1.0_r8]
+      allocate(sites(1)%rootfrac_scr(1:1))
+
+      bc_in(1)%nlevsoil = 1
+      bc_in(1)%max_rooting_depth_index_col = 1
+      allocate(bc_in(1)%h2o_liqvol_sl(1:1))
+      allocate(bc_in(1)%tempk_sl(1:1))
+      allocate(bc_in(1)%salinity_sl(1:1))
+
+      bc_in(1)%h2o_liqvol_sl = [0.3_r8]
+      bc_in(1)%tempk_sl = [298.15_r8]
+      bc_in(1)%salinity_sl = [0.01_r8]
+
+      call init_mock_prt_params()
+      prt_params%fnrt_prof_mode(1) = 2.0_r8
+      prt_params%fnrt_prof_a(1) = 5.0_r8
+
+      call btran_sal_stress_fates(nsites, sites, bc_in)
+
+      ! Verify that younger patch p2 in linked list was updated by subroutine
+      @assertEqual(0.9844909920064001_r8, p2%bstress_sal_ft(1), 1.0e-10_r8)
+
+      deallocate(sites(1)%zi_soil)
+      deallocate(sites(1)%rootfrac_scr)
+      deallocate(bc_in(1)%h2o_liqvol_sl)
+      deallocate(bc_in(1)%tempk_sl)
+      deallocate(bc_in(1)%salinity_sl)
+      deallocate(p2)
+      deallocate(p1)
+    end subroutine test_btran_sal_stress_multi_patch_traversal
+
+    !> Verifies that btran_sal_stress_fates calculates salinity stress across multiple plant functional types (PFTs)
+    @Test
+    subroutine test_btran_sal_stress_multi_pft(this)
+      class(TestFatesBstress), intent(inout) :: this
+      integer, parameter :: nsites = 1
+      type(ed_site_type), target :: sites(nsites)
+      type(bc_in_type) :: bc_in(nsites)
+      type(fates_patch_type), pointer :: p1
+
+      ! Two PFTs (numpft = 2) to verify multi-PFT loop in btran_sal_stress_fates
+      numpft = 2
+      allocate(p1)
+      p1%younger => null()
+      p1%bstress_sal_ft(:) = 0.0_r8
+      sites(1)%oldest_patch => p1
+
+      allocate(sites(1)%zi_soil(0:1))
+      sites(1)%zi_soil = [0.0_r8, 1.0_r8]
+      allocate(sites(1)%rootfrac_scr(1:1))
+
+      bc_in(1)%nlevsoil = 1
+      bc_in(1)%max_rooting_depth_index_col = 1
+      allocate(bc_in(1)%h2o_liqvol_sl(1:1))
+      allocate(bc_in(1)%tempk_sl(1:1))
+      allocate(bc_in(1)%salinity_sl(1:1))
+
+      bc_in(1)%h2o_liqvol_sl = [0.3_r8]
+      bc_in(1)%tempk_sl = [298.15_r8]
+      bc_in(1)%salinity_sl = [0.01_r8]
+
+      call init_mock_prt_params()
+      prt_params%fnrt_prof_mode(1) = 2.0_r8
+      prt_params%fnrt_prof_a(1) = 5.0_r8
+      prt_params%fnrt_prof_mode(2) = 2.0_r8
+      prt_params%fnrt_prof_a(2) = 3.0_r8
+
+      call btran_sal_stress_fates(nsites, sites, bc_in)
+
+      ! Verify stress computed for both PFT 1 and PFT 2
+      @assertEqual(0.9844909920064001_r8, p1%bstress_sal_ft(1), 1.0e-10_r8)
+      @assertEqual(0.9844909920064001_r8, p1%bstress_sal_ft(2), 1.0e-10_r8)
+
+      deallocate(sites(1)%zi_soil)
+      deallocate(sites(1)%rootfrac_scr)
+      deallocate(bc_in(1)%h2o_liqvol_sl)
+      deallocate(bc_in(1)%tempk_sl)
+      deallocate(bc_in(1)%salinity_sl)
+      deallocate(p1)
+    end subroutine test_btran_sal_stress_multi_pft
+
+    !> Verifies the full logistic (sigmoid) response curve of salinity stress across a gradient
+    @Test
+    subroutine test_btran_sal_stress_sweep(this)
+      class(TestFatesBstress), intent(inout) :: this
+      integer, parameter :: nsites = 1
+      type(ed_site_type), target :: sites(nsites)
+      type(bc_in_type) :: bc_in(nsites)
+      type(fates_patch_type), pointer :: p1
+      integer :: i
+      
+      ! 1. Define grid of inputs and exact expected analytical outputs
+      real(r8), parameter :: test_salinity(4) = [0.0_r8, 0.186_r8, 0.5_r8, 5.0_r8]
+      real(r8), parameter :: expected_stress(4) = [0.9997059714392131_r8, 0.6220000000000000_r8, 0.1054969155441173_r8, 0.0_r8]
+
+      numpft = 1
+      allocate(p1)
+      p1%younger => null()
+      sites(1)%oldest_patch => p1
+
+      allocate(sites(1)%zi_soil(0:1))
+      sites(1)%zi_soil = [0.0_r8, 1.0_r8]
+      allocate(sites(1)%rootfrac_scr(1:1))
+      sites(1)%rootfrac_scr(1) = 1.0_r8
+
+      bc_in(1)%nlevsoil = 1
+      bc_in(1)%max_rooting_depth_index_col = 1
+      allocate(bc_in(1)%h2o_liqvol_sl(1:1))
+      allocate(bc_in(1)%tempk_sl(1:1))
+      allocate(bc_in(1)%salinity_sl(1:1))
+
+      bc_in(1)%h2o_liqvol_sl(1) = 0.5_r8
+      bc_in(1)%tempk_sl(1) = 290.0_r8
+
+      call init_mock_prt_params()
+      prt_params%fnrt_prof_mode(1) = 2.0_r8
+      prt_params%fnrt_prof_a(1) = 5.0_r8
+
+      ! 2. Parameter Sweep
+      do i = 1, size(test_salinity)
+         p1%bstress_sal_ft(:) = 0.0_r8
+         bc_in(1)%salinity_sl(1) = test_salinity(i)
+         
+         call btran_sal_stress_fates(nsites, sites, bc_in)
+         
+         @assertEqual(expected_stress(i), p1%bstress_sal_ft(1), 1.e-5_r8, &
+                      message="Failed salinity response curve at point")
+      end do
+
+      deallocate(sites(1)%zi_soil)
+      deallocate(sites(1)%rootfrac_scr)
+      deallocate(bc_in(1)%h2o_liqvol_sl)
+      deallocate(bc_in(1)%tempk_sl)
+      deallocate(bc_in(1)%salinity_sl)
+      deallocate(p1)
+    end subroutine test_btran_sal_stress_sweep
+
+end module test_FatesBstress
