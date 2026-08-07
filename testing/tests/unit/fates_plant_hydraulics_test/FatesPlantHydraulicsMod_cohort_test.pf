@@ -24,69 +24,74 @@ module FatesPlantHydraulicsMod_cohort_test
 
 contains
 
-  ! Summary: Tests conversion of relative water content (theta) to matric potential (psi) and fractional loss of conductivity (ftc) using explicit parameter signature without site/cohort mock objects.
+  ! Summary: Tests explicitly passed arrays for relative water content (theta) to matric potential (psi) and FTC mapping over a full gradient.
   @Test
-  subroutine test_UpdatePlantPsiFTCFromTheta(this)
+  subroutine test_UpdatePlantPsiFTCFromTheta_sweep(this)
     use FatesUnitTestPRTParametersMod, only : init_mock_prt_params
     use EDPftvarconMockMod, only : init_mock_edpftvarcon
+    use FatesHydraulicsMemMod, only : n_plant_media, leaf_p_media
+    use EDPftvarcon, only : EDPftvarcon_inst
 
     class(TestPlantHydraulicsCohort), intent(inout) :: this
-    integer :: pft, nlevrhiz
-    ! Relative water content theta [m3/m3] chosen near saturation
+    integer :: pft, nlevrhiz, i
     real(r8) :: th_ag(n_hypool_ag), th_troot, th_aroot(1)
-    ! Output hydraulic state variables: matric potential [MPa] and fractional loss of conductivity [dimensionless]
     real(r8) :: psi_ag(n_hypool_ag), ftc_ag(n_hypool_ag), btran
     real(r8) :: psi_troot, ftc_troot
     real(r8) :: psi_aroot(1), ftc_aroot(1)
     real(r8) :: expected_psi, expected_ftc
-    ! Tight numerical tolerance selected to validate analytical van Genuchten formula precision
+    real(r8) :: alpha, m_vg, n_vg, th_sat, th_res, p50, avuln, se, th_test
     real(r8), parameter :: tol = 1.e-6_r8
 
-    ! Initialize mock PRT parameters and PFT 1 van Genuchten parameters
     call init_mock_prt_params()
     call init_mock_edpftvarcon()
     call InitHydroGlobals()
 
-    ! Target plant functional type index and single rhizosphere soil layer count
     pft = 1
     nlevrhiz = 1
+    
+    ! Fetch the mathematical parameters for the analytical oracles directly from the initialized mock state
+    alpha = EDPftvarcon_inst%hydr_vg_alpha_node(pft, leaf_p_media)
+    m_vg = EDPftvarcon_inst%hydr_vg_m_node(pft, leaf_p_media)
+    n_vg = EDPftvarcon_inst%hydr_vg_n_node(pft, leaf_p_media)
+    th_sat = EDPftvarcon_inst%hydr_thetas_node(pft, leaf_p_media)
+    th_res = EDPftvarcon_inst%hydr_resid_node(pft, leaf_p_media)
+    p50 = EDPftvarcon_inst%hydr_p50_node(pft, leaf_p_media)
+    avuln = EDPftvarcon_inst%hydr_avuln_node(pft, leaf_p_media)
 
-    ! Relative water content theta [m3/m3] chosen at 98% of saturated porosity
-    ! Rationale: Evaluates non-linear retention dynamics near saturation while avoiding singular saturation limits
-    th_ag(:) = 0.49_r8
-    th_troot = 0.49_r8
-    th_aroot(1) = 0.49_r8
+    ! Parameter Sweep: Evaluate from 98% saturation down to 10% (near residual)
+    do i = 1, 10
+       ! Generate a test theta
+       th_test = th_res + (th_sat - th_res) * (1.0_r8 - (real(i, r8) / 11.0_r8))
+       
+       th_ag(:) = th_test
+       th_troot = th_test
+       th_aroot(1) = th_test
 
-    ! Execute explicit conversion routine directly
-    call UpdatePlantPsiFTCFromTheta_explicit(pft, nlevrhiz, th_ag, th_troot, th_aroot, &
-                                             psi_ag, ftc_ag, btran, psi_troot, ftc_troot, &
-                                             psi_aroot, ftc_aroot)
+       ! Execute explicit conversion routine directly
+       call UpdatePlantPsiFTCFromTheta_explicit(pft, nlevrhiz, th_ag, th_troot, th_aroot, &
+                                                psi_ag, ftc_ag, btran, psi_troot, ftc_troot, &
+                                                psi_aroot, ftc_aroot)
 
-    ! Analytical solution derivation:
-    ! Effective saturation se = (0.49 - 0.05) / (0.5 - 0.05) = 44/45
-    ! Psi = - (1 / alpha) * ((se^(-1/m) - 1)^(1/n)) = -21.4408662092 MPa
-    ! FTC = 1 / (1 + (psi / p50)^avuln) = 0.62466256568
-    expected_psi = -21.440866209219568_r8
-    expected_ftc = 0.62466256568279799_r8
+       ! Analytical Oracle 1: Van Genuchten Psi
+       se = (th_test - th_res) / (th_sat - th_res)
+       expected_psi = -(1.0_r8 / alpha) * ((se**(-1.0_r8 / m_vg) - 1.0_r8)**(1.0_r8 / n_vg))
+       
+       ! Analytical Oracle 2: Weibull FTC
+       expected_ftc = 1.0_r8 / (1.0_r8 + (expected_psi / p50)**avuln)
 
-    @assertEqual(expected_psi, psi_ag(1), tolerance=tol)
-    @assertEqual(expected_ftc, ftc_ag(1), tolerance=tol)
+       @assertEqual(expected_psi, psi_ag(1), tol, message="Failed VG Psi curve")
+       @assertEqual(expected_ftc, ftc_ag(1), tol, message="Failed Weibull FTC curve")
+       @assertEqual(expected_psi, psi_troot, tol)
+       @assertEqual(expected_ftc, ftc_troot, tol)
+       @assertEqual(expected_psi, psi_aroot(1), tol)
+       @assertEqual(expected_ftc, ftc_aroot(1), tol)
 
-    @assertEqual(expected_psi, psi_troot, tolerance=tol)
-    @assertEqual(expected_ftc, ftc_troot, tolerance=tol)
+       ! Invariants
+       @assertTrue(all(psi_ag <= 0.0_r8))
+       @assertTrue(all(ftc_ag >= 0.0_r8 .and. ftc_ag <= 1.0_r8))
+    end do
 
-    @assertEqual(expected_psi, psi_aroot(1), tolerance=tol)
-    @assertEqual(expected_ftc, ftc_aroot(1), tolerance=tol)
-
-    ! Invariant B: Physical state boundaries (psi <= 0.0 MPa and 0.0 <= FTC <= 1.0)
-    @assertTrue(all(psi_ag <= 0.0_r8))
-    @assertTrue(all(ftc_ag >= 0.0_r8 .and. ftc_ag <= 1.0_r8))
-    @assertTrue(psi_troot <= 0.0_r8)
-    @assertTrue(ftc_troot >= 0.0_r8 .and. ftc_troot <= 1.0_r8)
-    @assertTrue(all(psi_aroot <= 0.0_r8))
-    @assertTrue(all(ftc_aroot >= 0.0_r8 .and. ftc_aroot <= 1.0_r8))
-
-  end subroutine test_UpdatePlantPsiFTCFromTheta
+  end subroutine test_UpdatePlantPsiFTCFromTheta_sweep
 
 
   ! Summary: Tests maximum hydraulic conductance (kmax) scaling using explicit parameters without global PFT/PRT mock objects.

@@ -199,6 +199,42 @@ contains
     deallocate(ccohort_hydr%v_aroot_layer_init)
   end subroutine test_SavePreviousCompartmentVolumes
 
+  ! Summary: Tests SumBetweenDepths integration when requested bottom depth exceeds total soil column depth.
+  @Test
+  subroutine test_SumBetweenDepths_ExceedingSoilColumn(this)
+    use FatesPlantHydraulicsMod, only : SumBetweenDepths
+    class(TestPlantHydraulicsGeom), intent(inout) :: this
+    type(ed_site_hydr_type) :: csite_hydr
+    real(r8) :: array_in(2)
+    real(r8) :: result_sum
+    real(r8), parameter :: tol = 1.e-6_r8
+
+    ! Soil column with 2 layers: layer 1 [0.0 - 0.5m, dz=0.5], layer 2 [0.5 - 1.0m, dz=0.5]
+    csite_hydr%nlevrhiz = 2
+    allocate(csite_hydr%zi_rhiz(2))
+    allocate(csite_hydr%dz_rhiz(2))
+    csite_hydr%zi_rhiz(1) = 0.5_r8
+    csite_hydr%zi_rhiz(2) = 1.0_r8
+    csite_hydr%dz_rhiz(1) = 0.5_r8
+    csite_hydr%dz_rhiz(2) = 0.5_r8
+
+    ! Quantity array_in: 10.0 in layer 1, 20.0 in layer 2
+    ! Total integral across full 1.0m soil column = 10*0.5 + 20*0.5 = 15.0
+    ! Average flux per meter over 1.0m soil column = 15.0 / 1.0 = 15.0
+    array_in(1) = 10.0_r8
+    array_in(2) = 20.0_r8
+
+    ! Query integration depth depth_t = 0.0m, depth_b = 3.0m (exceeds soil column 1.0m)
+    ! Proper soil column capping: integral is 30.0 / (min(3.0, 1.0) - 0.0) = 30.0 / 1.0 = 30.0
+    ! Mutated code (uncapped): integral is 30.0 / (3.0 - 0.0) = 10.0 (FAILS!)
+    result_sum = SumBetweenDepths(csite_hydr, 0.0_r8, 3.0_r8, array_in)
+
+    @assertEqual(30.0_r8, result_sum, tolerance=tol)
+
+    deallocate(csite_hydr%zi_rhiz)
+    deallocate(csite_hydr%dz_rhiz)
+  end subroutine test_SumBetweenDepths_ExceedingSoilColumn
+
 end module FatesPlantHydraulicsMod_geom_test
 
 
