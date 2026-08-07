@@ -262,6 +262,7 @@ module FatesPlantHydraulicsMod
   public :: UpdateSizeDepRhizHydProps
   public :: RestartHydrStates
   public :: SavePreviousCompartmentVolumes
+  public :: SumBetweenDepths ! only public for unit tests
 
   public :: UpdatePlantHydrNodes
   public :: UpdatePlantHydrLenVol
@@ -3007,7 +3008,9 @@ subroutine UpdatePlantKmax(ccohort_hydr,ccohort,csite_hydr)
 
   ccohort_hydr%kmax_petiole_to_leaf = 1.e8_r8
 
+
   ! Stem Maximum Hydraulic Conductance
+
   do k=1, n_hypool_stem
 
      ! index for "above-ground" arrays, that contain stem and leaf
@@ -3020,6 +3023,7 @@ subroutine UpdatePlantKmax(ccohort_hydr,ccohort,csite_hydr)
      z_node  = ccohort_hydr%z_node_ag(n_hypool_leaf) - ccohort_hydr%z_node_ag(k_ag)
      z_upper = max( min_pet_stem_dz,ccohort_hydr%z_node_ag(n_hypool_leaf) - &
           ccohort_hydr%z_upper_ag(k_ag))
+
 
      ! Then we calculate the maximum conductance from each the lower, node and upper
      ! edges of the compartment to the petiole. The xylem taper factor requires
@@ -5625,16 +5629,26 @@ function SumBetweenDepths(csite_hydr,depth_t,depth_b,array_in) result(depth_sum)
    depth_sum = depth_sum + sum(array_in(i_rhiz_t:i_rhiz_b))
    end if
 
-   ! Find fraction contribution from top partial layer (if any)
-   if(i_rhiz_t>1) then
-   frac = (csite_hydr%zi_rhiz(i_rhiz_t-1)-depth_t)/csite_hydr%dz_rhiz(i_rhiz_t-1)
-   depth_sum = depth_sum + frac*array_in(i_rhiz_t-1)
-   end if
+   if (i_rhiz_t - 1 == i_rhiz_b + 1) then
+       ! Top and bottom depths fall within the same layer
+       frac = (depth_b - depth_t) / csite_hydr%dz_rhiz(i_rhiz_t-1)
+       depth_sum = depth_sum + frac*array_in(i_rhiz_t-1)
+   else
+       ! Find fraction contribution from top partial layer (if any)
+       if(i_rhiz_t>1) then
+           frac = (csite_hydr%zi_rhiz(i_rhiz_t-1)-depth_t)/csite_hydr%dz_rhiz(i_rhiz_t-1)
+           depth_sum = depth_sum + frac*array_in(i_rhiz_t-1)
+       end if
 
-   ! Find fraction contribution from bottom partial layer (if any)
-   if(i_rhiz_b<nlevrhiz) then
-   frac = (depth_b-csite_hydr%zi_rhiz(i_rhiz_b))/csite_hydr%dz_rhiz(i_rhiz_b+1)
-   depth_sum = depth_sum + frac*array_in(i_rhiz_b+1)
+       ! Find fraction contribution from bottom partial layer (if any)
+       if(i_rhiz_b<nlevrhiz) then
+           if(i_rhiz_b == 0) then
+               frac = depth_b / csite_hydr%dz_rhiz(1)
+           else
+               frac = (depth_b-csite_hydr%zi_rhiz(i_rhiz_b))/csite_hydr%dz_rhiz(i_rhiz_b+1)
+           end if
+           depth_sum = depth_sum + frac*array_in(i_rhiz_b+1)
+       end if
    end if
 
    depth_sum = depth_sum/(min(depth_b,csite_hydr%zi_rhiz(nlevrhiz))-depth_t)

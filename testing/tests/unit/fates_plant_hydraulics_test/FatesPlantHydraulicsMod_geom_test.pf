@@ -3,7 +3,7 @@
 ! Tests for FatesPlantHydraulicsMod geometric calculations (nodes, length, and volumes)
 !=========================================================================================
 module FatesPlantHydraulicsMod_geom_test
-  use FatesPlantHydraulicsMod, only : UpdatePlantHydrNodes, UpdatePlantHydrLenVol, SavePreviousCompartmentVolumes
+  use FatesPlantHydraulicsMod, only : UpdatePlantHydrNodes, UpdatePlantHydrLenVol, SavePreviousCompartmentVolumes, SumBetweenDepths
   use FatesCohortMod, only : fates_cohort_type
   use FatesHydraulicsMemMod, only : ed_site_hydr_type, ed_cohort_hydr_type
   use FatesParameterDerivedMod, only : param_derived
@@ -199,6 +199,55 @@ contains
     deallocate(ccohort_hydr%v_aroot_layer_init)
   end subroutine test_SavePreviousCompartmentVolumes
 
+  ! Summary: Tests SumBetweenDepths depth-weighted integration across non-uniform soil layer interfaces, partial overlaps, and boundary limits.
+  @Test
+  subroutine test_SumBetweenDepths(this)
+    class(TestPlantHydraulicsGeom), intent(inout) :: this
+    type(ed_site_hydr_type) :: csite_hydr
+    ! Layer profile input quantities
+    real(r8) :: array_in(3)
+    real(r8) :: res_full, res_partial, res_out_of_bounds
+    real(r8), parameter :: tol = 1.e-6_r8
+
+    ! 3 rhizosphere soil layers setup with non-uniform thickness
+    csite_hydr%nlevrhiz = 3
+    allocate(csite_hydr%zi_rhiz(3))
+    allocate(csite_hydr%dz_rhiz(3))
+    ! Soil depth interfaces [m] (0.25m top, 0.75m middle, 1.75m bottom interface)
+    csite_hydr%zi_rhiz(1) = 0.25_r8
+    csite_hydr%zi_rhiz(2) = 0.75_r8
+    csite_hydr%zi_rhiz(3) = 1.75_r8
+    ! Soil layer thicknesses [m] (0.25m, 0.50m, 1.00m)
+    csite_hydr%dz_rhiz(1) = 0.25_r8
+    csite_hydr%dz_rhiz(2) = 0.50_r8
+    csite_hydr%dz_rhiz(3) = 1.00_r8
+
+    ! Quantity array per soil layer [units/layer]
+    array_in(1) = 10.0_r8
+    array_in(2) = 20.0_r8
+    array_in(3) = 30.0_r8
+
+    ! Case 1: Integration over full layer 2 (0.25m to 0.75m)
+    ! Rationale: Verifies encasement sum (20.0 / 0.5 = 40.0 depth-weighted rate)
+    res_full = SumBetweenDepths(csite_hydr, 0.25_r8, 0.75_r8, array_in)
+    @assertEqual(40.0_r8, res_full, tolerance=tol)
+
+    ! Case 2: Integration over layers 1 and 2 (0.0m to 0.75m)
+    ! Rationale: Encase layers 1 and 2 (sum 10 + 20 = 30 over 0.75m interval => 40.0)
+    res_partial = SumBetweenDepths(csite_hydr, 0.0_r8, 0.75_r8, array_in)
+    @assertEqual(40.0_r8, res_partial, tolerance=tol)
+
+    ! Case 3: Integration depth beyond soil profile (2.0m to 3.0m)
+    ! Rationale: Deeper than soil column returns 0.0
+    res_out_of_bounds = SumBetweenDepths(csite_hydr, 2.0_r8, 3.0_r8, array_in)
+    @assertEqual(0.0_r8, res_out_of_bounds, tolerance=tol)
+
+    ! Invariants: Non-negative integration density
+    @assertTrue(res_full >= 0.0_r8)
+    @assertTrue(res_partial >= 0.0_r8)
+
+    deallocate(csite_hydr%zi_rhiz)
+    deallocate(csite_hydr%dz_rhiz)
+  end subroutine test_SumBetweenDepths
+
 end module FatesPlantHydraulicsMod_geom_test
-
-
