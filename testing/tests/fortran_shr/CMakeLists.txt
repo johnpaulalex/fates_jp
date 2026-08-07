@@ -6,6 +6,7 @@ list(APPEND fates_sources
   SyntheticPatchTypes.F90
   FatesUnitTestUtils.F90
   EDPftvarconMockMod.F90
+  EDTypesMockMod.F90
   FatesUnitTestPRTParametersMod.F90)
 
 sourcelist_to_parent(fates_sources)
