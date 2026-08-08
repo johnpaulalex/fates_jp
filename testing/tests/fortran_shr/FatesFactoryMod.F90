@@ -13,7 +13,8 @@ module FatesFactoryMod
   use FatesGlobals,                only : endrun => fates_endrun
   use FatesCohortMod,              only : fates_cohort_type
   use FatesPatchMod,               only : fates_patch_type
-  use EDTypesMod,                  only : init_spread_inventory
+  use EDTypesMod,                  only : init_spread_inventory, ed_site_type
+  use FatesInterfaceTypesMod,      only : bc_in_type, bc_out_type
   use FatesRadiationMemMod,        only : num_swb
   use EDParamsMod,                 only : vai_top_bin_width
   use EDParamsMod,                 only : vai_width_increase_factor
@@ -553,5 +554,78 @@ module FatesFactoryMod
     patch%tallest => cohort
   
   end subroutine CreateTestPatchList
-  
+
+  !---------------------------------------------------------------------------------------
+  ! DESCRIPTION:
+  ! Helper for setting transient timestep flux rates and accumulators on a cohort for unit testing
+  subroutine SetTestFluxes(cohort, gpp_acc, gpp_tstep, resp_m_acc, resp_m_tstep, &
+                           sym_nfix_daily, sym_nfix_tstep, c13disc_acc, c13disc_clm, &
+                           year_net_uptake, ts_net_uptake, nv)
+    type(fates_cohort_type), pointer, intent(inout) :: cohort
+    real(r8), optional, intent(in) :: gpp_acc
+    real(r8), optional, intent(in) :: gpp_tstep
+    real(r8), optional, intent(in) :: resp_m_acc
+    real(r8), optional, intent(in) :: resp_m_tstep
+    real(r8), optional, intent(in) :: sym_nfix_daily
+    real(r8), optional, intent(in) :: sym_nfix_tstep
+    real(r8), optional, intent(in) :: c13disc_acc
+    real(r8), optional, intent(in) :: c13disc_clm
+    real(r8), optional, intent(in) :: year_net_uptake
+    real(r8), optional, intent(in) :: ts_net_uptake
+    integer,  optional, intent(in) :: nv
+
+    if (present(gpp_acc))          cohort%gpp_acc            = gpp_acc
+    if (present(gpp_tstep))        cohort%gpp_tstep          = gpp_tstep
+    if (present(resp_m_acc))       cohort%resp_m_acc         = resp_m_acc
+    if (present(resp_m_tstep))      cohort%resp_m_tstep       = resp_m_tstep
+    if (present(sym_nfix_daily))   cohort%sym_nfix_daily     = sym_nfix_daily
+    if (present(sym_nfix_tstep))   cohort%sym_nfix_tstep     = sym_nfix_tstep
+    if (present(c13disc_acc))      cohort%c13disc_acc        = c13disc_acc
+    if (present(c13disc_clm))      cohort%c13disc_clm        = c13disc_clm
+    if (present(nv))               cohort%nv                 = nv
+
+    if (present(year_net_uptake)) then
+       cohort%year_net_uptake(1) = year_net_uptake
+    end if
+    if (present(ts_net_uptake)) then
+       cohort%ts_net_uptake(1) = ts_net_uptake
+    end if
+
+  end subroutine SetTestFluxes
+
+  !---------------------------------------------------------------------------------------
+  ! DESCRIPTION:
+  ! High-level factory building a site containing a patch with a cohort linked list
+  subroutine CreateTestSite(sites, patch, cohort, bc_in, heights, dbhs, pft)
+    type(ed_site_type),     target, intent(inout) :: sites(:)
+    type(fates_patch_type), pointer, intent(out)   :: patch
+    type(fates_cohort_type), pointer, intent(out)   :: cohort
+    type(bc_in_type),               intent(inout) :: bc_in(:)
+    real(r8),                       intent(in)    :: heights(:)
+    real(r8),             optional, intent(in)    :: dbhs(:)
+    integer,              optional, intent(in)    :: pft
+
+    integer :: local_pft
+
+    local_pft = 1; if (present(pft)) local_pft = pft
+
+    allocate(patch)
+    ! Create patch and cohort linked list via CreateTestPatchList
+    if (present(dbhs)) then
+       call CreateTestPatchList(patch, heights, dbhs=dbhs)
+    else
+       call CreateTestPatchList(patch, heights)
+    end if
+
+    patch%patchno = 1
+    patch%nocomp_pft_label = local_pft
+    sites(1)%oldest_patch => patch
+    cohort => patch%shortest
+
+    if (allocated(bc_in(1)%filter_photo_pa)) deallocate(bc_in(1)%filter_photo_pa)
+    allocate(bc_in(1)%filter_photo_pa(1))
+    bc_in(1)%filter_photo_pa(1) = 3
+
+  end subroutine CreateTestSite
+
 end module FatesFactoryMod

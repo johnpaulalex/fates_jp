@@ -8,6 +8,7 @@ module test_EDAccumulateFluxes
   use FatesCohortMod, only : fates_cohort_type
   use FatesInterfaceTypesMod, only : bc_in_type, bc_out_type
   use EDAccumulateFluxesMod, only : AccumulateFluxes_ED
+  use FatesFactoryMod, only : CreateTestSite, SetTestFluxes
   use funit
   implicit none
 
@@ -31,36 +32,13 @@ module test_EDAccumulateFluxes
       type(fates_cohort_type), pointer :: cohort
       real(r8) :: dt_time
 
-      allocate(patch)
-      allocate(cohort)
-      call cohort%CreateBare(pft=1, nn=0.1_r8, height=10.0_r8)
+      call CreateTestSite(sites, patch, cohort, bc_in, heights=[10.0_r8])
 
-      ! Patch 1 with active vegetated PFT label 1
-      patch%patchno = 1
-      patch%nocomp_pft_label = 1
+      call SetTestFluxes(cohort, gpp_acc=1.0_r8, gpp_tstep=0.5_r8, resp_m_acc=0.2_r8, &
+                         resp_m_tstep=0.1_r8, sym_nfix_daily=0.05_r8, sym_nfix_tstep=0.02_r8, &
+                         c13disc_acc=0.1_r8, c13disc_clm=0.2_r8, year_net_uptake=0.2_r8, &
+                         ts_net_uptake=0.5_r8, nv=1)
 
-      ! Baseline test fixture fluxes: GPP, respiration, N-fixation, C13 discrimination, and net uptake in kg C m-2 s-1
-      cohort%gpp_acc = 1.0_r8
-      cohort%gpp_tstep = 0.5_r8
-      cohort%resp_m_acc = 0.2_r8
-      cohort%resp_m_tstep = 0.1_r8
-      cohort%sym_nfix_daily = 0.05_r8
-      cohort%sym_nfix_tstep = 0.02_r8
-      cohort%c13disc_acc = 0.1_r8
-      cohort%c13disc_clm = 0.2_r8
-      cohort%nv = 1
-      cohort%year_net_uptake(1) = 0.2_r8
-      cohort%ts_net_uptake(1) = 0.5_r8
-      
-      cohort%taller => null()
-      patch%shortest => cohort
-      patch%younger => null()
-      sites(1)%oldest_patch => patch
-      
-      allocate(bc_in(1)%filter_photo_pa(1))
-      ! FATES photosynthesis filter flag 3 indicates active photosynthesis on vegetated patch
-      bc_in(1)%filter_photo_pa(1) = 3
-      ! Timestep duration of 1 hour (3600s) + 0.2s offset (unreferenced dummy argument in AccumulateFluxes_ED)
       dt_time = 3600.2_r8
 
       call AccumulateFluxes_ED(nsites, sites, bc_in, bc_out, dt_time)
@@ -96,35 +74,13 @@ module test_EDAccumulateFluxes
       type(fates_cohort_type), pointer :: cohort
       real(r8) :: dt_time
 
-      allocate(patch)
-      allocate(cohort)
-      call cohort%CreateBare(pft=1, nn=0.1_r8, height=10.0_r8)
+      call CreateTestSite(sites, patch, cohort, bc_in, heights=[10.0_r8])
 
-      patch%patchno = 1
-      patch%nocomp_pft_label = 1
+      call SetTestFluxes(cohort, gpp_acc=1.0_r8, gpp_tstep=-1.0_r8, resp_m_acc=0.2_r8, &
+                         resp_m_tstep=0.1_r8, sym_nfix_daily=0.05_r8, sym_nfix_tstep=0.02_r8, &
+                         c13disc_acc=0.1_r8, c13disc_clm=0.2_r8, year_net_uptake=0.2_r8, &
+                         ts_net_uptake=0.5_r8, nv=1)
 
-      ! Fixture fluxes set up so GPP_acc + GPP_tstep = 0.0_r8
-      cohort%gpp_acc = 1.0_r8
-      cohort%gpp_tstep = -1.0_r8 ! Sums to zero
-      cohort%resp_m_acc = 0.2_r8
-      cohort%resp_m_tstep = 0.1_r8
-      cohort%sym_nfix_daily = 0.05_r8
-      cohort%sym_nfix_tstep = 0.02_r8
-      cohort%c13disc_acc = 0.1_r8
-      cohort%c13disc_clm = 0.2_r8
-      cohort%nv = 1
-      cohort%year_net_uptake(1) = 0.2_r8
-      cohort%ts_net_uptake(1) = 0.5_r8
-      
-      cohort%taller => null()
-      patch%shortest => cohort
-      patch%younger => null()
-      sites(1)%oldest_patch => patch
-      
-      allocate(bc_in(1)%filter_photo_pa(1))
-      ! FATES photosynthesis filter flag 3 indicates active photosynthesis on vegetated patch
-      bc_in(1)%filter_photo_pa(1) = 3
-      ! Timestep duration of 1 hour (3600s) + 0.2s offset (unreferenced dummy argument in AccumulateFluxes_ED)
       dt_time = 3600.2_r8
 
       call AccumulateFluxes_ED(nsites, sites, bc_in, bc_out, dt_time)
@@ -154,36 +110,13 @@ module test_EDAccumulateFluxes
       type(fates_cohort_type), pointer :: cohort
       real(r8) :: dt_time
 
-      allocate(patch)
-      allocate(cohort)
-      call cohort%CreateBare(pft=1, nn=0.1_r8, height=10.0_r8)
+      call CreateTestSite(sites, patch, cohort, bc_in, heights=[10.0_r8])
 
-      patch%patchno = 1
-      patch%nocomp_pft_label = 1
+      call SetTestFluxes(cohort, gpp_acc=1.0_r8, gpp_tstep=0.5_r8, resp_m_acc=0.2_r8, &
+                         resp_m_tstep=0.1_r8, sym_nfix_daily=0.2_r8, sym_nfix_tstep=0.2_r8, &
+                         c13disc_acc=0.1_r8, c13disc_clm=0.2_r8, year_net_uptake=999.0_r8, &
+                         ts_net_uptake=0.5_r8, nv=1)
 
-      ! Fixture fluxes with sentinel 999.0_r8 in year_net_uptake
-      cohort%gpp_acc = 1.0_r8
-      cohort%gpp_tstep = 0.5_r8
-      cohort%resp_m_acc = 0.2_r8
-      cohort%resp_m_tstep = 0.1_r8
-      cohort%sym_nfix_daily = 0.2_r8
-      cohort%sym_nfix_tstep = 0.2_r8
-      cohort%c13disc_acc = 0.1_r8
-      cohort%c13disc_clm = 0.2_r8
-      cohort%nv = 1
-      ! Uninitialized sentinel flag 999.0_r8 used in FATES to indicate unassigned net uptake state
-      cohort%year_net_uptake(1) = 999.0_r8
-      cohort%ts_net_uptake(1) = 0.5_r8
-      
-      cohort%taller => null()
-      patch%shortest => cohort
-      patch%younger => null()
-      sites(1)%oldest_patch => patch
-      
-      allocate(bc_in(1)%filter_photo_pa(1))
-      ! FATES photosynthesis filter flag 3 indicates active photosynthesis on vegetated patch
-      bc_in(1)%filter_photo_pa(1) = 3
-      ! Timestep duration of 1 hour (3600s) + 0.2s offset (unreferenced dummy argument in AccumulateFluxes_ED)
       dt_time = 3600.2_r8
 
       call AccumulateFluxes_ED(nsites, sites, bc_in, bc_out, dt_time)
@@ -222,34 +155,20 @@ module test_EDAccumulateFluxes
       ! Patch 1: Bare ground patch label
       patch_bare%patchno = 1
       patch_bare%nocomp_pft_label = nocomp_bareground
-      cohort_bare%gpp_acc = 1.0_r8
-      cohort_bare%gpp_tstep = 0.5_r8
-      cohort_bare%resp_m_acc = 0.2_r8
-      cohort_bare%resp_m_tstep = 0.1_r8
-      cohort_bare%sym_nfix_daily = 0.2_r8
-      cohort_bare%sym_nfix_tstep = 0.2_r8
-      cohort_bare%c13disc_acc = 0.1_r8
-      cohort_bare%c13disc_clm = 0.2_r8
-      cohort_bare%nv = 1
-      cohort_bare%year_net_uptake(1) = 0.2_r8
-      cohort_bare%ts_net_uptake(1) = 0.5_r8
+      call SetTestFluxes(cohort_bare, gpp_acc=1.0_r8, gpp_tstep=0.5_r8, resp_m_acc=0.2_r8, &
+                         resp_m_tstep=0.1_r8, sym_nfix_daily=0.2_r8, sym_nfix_tstep=0.2_r8, &
+                         c13disc_acc=0.1_r8, c13disc_clm=0.2_r8, year_net_uptake=0.2_r8, &
+                         ts_net_uptake=0.5_r8, nv=1)
       cohort_bare%taller => null()
       patch_bare%shortest => cohort_bare
 
       ! Patch 2: filter_photo_pa != 3 (inactive photosynthesis filter)
       patch_skip%patchno = 2
       patch_skip%nocomp_pft_label = 1
-      cohort_skip%gpp_acc = 1.0_r8
-      cohort_skip%gpp_tstep = 0.5_r8
-      cohort_skip%resp_m_acc = 0.2_r8
-      cohort_skip%resp_m_tstep = 0.1_r8
-      cohort_skip%sym_nfix_daily = 0.2_r8
-      cohort_skip%sym_nfix_tstep = 0.2_r8
-      cohort_skip%c13disc_acc = 0.1_r8
-      cohort_skip%c13disc_clm = 0.2_r8
-      cohort_skip%nv = 1
-      cohort_skip%year_net_uptake(1) = 0.2_r8
-      cohort_skip%ts_net_uptake(1) = 0.5_r8
+      call SetTestFluxes(cohort_skip, gpp_acc=1.0_r8, gpp_tstep=0.5_r8, resp_m_acc=0.2_r8, &
+                         resp_m_tstep=0.1_r8, sym_nfix_daily=0.2_r8, sym_nfix_tstep=0.2_r8, &
+                         c13disc_acc=0.1_r8, c13disc_clm=0.2_r8, year_net_uptake=0.2_r8, &
+                         ts_net_uptake=0.5_r8, nv=1)
       cohort_skip%taller => null()
       patch_skip%shortest => cohort_skip
 
@@ -302,52 +221,19 @@ module test_EDAccumulateFluxes
       type(fates_cohort_type), pointer :: cohort_under, cohort_canopy
       real(r8) :: dt_time
 
-      allocate(patch)
-      allocate(cohort_under)
-      call cohort_under%CreateBare(pft=1, nn=0.1_r8, height=5.0_r8)
-      allocate(cohort_canopy)
-      call cohort_canopy%CreateBare(pft=1, nn=0.1_r8, height=15.0_r8)
+      call CreateTestSite(sites, patch, cohort_under, bc_in, heights=[5.0_r8, 15.0_r8])
+      cohort_canopy => cohort_under%taller
 
-      patch%patchno = 1
-      patch%nocomp_pft_label = 1
+      call SetTestFluxes(cohort_under, gpp_acc=1.0_r8, gpp_tstep=0.5_r8, resp_m_acc=0.2_r8, &
+                         resp_m_tstep=0.1_r8, sym_nfix_daily=0.05_r8, sym_nfix_tstep=0.02_r8, &
+                         c13disc_acc=0.1_r8, c13disc_clm=0.2_r8, year_net_uptake=0.2_r8, &
+                         ts_net_uptake=0.5_r8, nv=1)
 
-      ! Understory cohort fixture values
-      cohort_under%gpp_acc = 1.0_r8
-      cohort_under%gpp_tstep = 0.5_r8
-      cohort_under%resp_m_acc = 0.2_r8
-      cohort_under%resp_m_tstep = 0.1_r8
-      cohort_under%sym_nfix_daily = 0.05_r8
-      cohort_under%sym_nfix_tstep = 0.02_r8
-      cohort_under%c13disc_acc = 0.1_r8
-      cohort_under%c13disc_clm = 0.2_r8
-      cohort_under%nv = 1
-      cohort_under%year_net_uptake(1) = 0.2_r8
-      cohort_under%ts_net_uptake(1) = 0.5_r8
+      call SetTestFluxes(cohort_canopy, gpp_acc=2.0_r8, gpp_tstep=1.0_r8, resp_m_acc=0.4_r8, &
+                         resp_m_tstep=0.2_r8, sym_nfix_daily=0.10_r8, sym_nfix_tstep=0.04_r8, &
+                         c13disc_acc=0.1_r8, c13disc_clm=0.2_r8, year_net_uptake=0.4_r8, &
+                         ts_net_uptake=1.0_r8, nv=1)
 
-      ! Canopy cohort fixture values
-      cohort_canopy%gpp_acc = 2.0_r8
-      cohort_canopy%gpp_tstep = 1.0_r8
-      cohort_canopy%resp_m_acc = 0.4_r8
-      cohort_canopy%resp_m_tstep = 0.2_r8
-      cohort_canopy%sym_nfix_daily = 0.10_r8
-      cohort_canopy%sym_nfix_tstep = 0.04_r8
-      cohort_canopy%c13disc_acc = 0.1_r8
-      cohort_canopy%c13disc_clm = 0.2_r8
-      cohort_canopy%nv = 1
-      cohort_canopy%year_net_uptake(1) = 0.4_r8
-      cohort_canopy%ts_net_uptake(1) = 1.0_r8
-
-      ! Link understory -> canopy -> null
-      cohort_under%taller => cohort_canopy
-      cohort_canopy%taller => null()
-      patch%shortest => cohort_under
-      patch%younger => null()
-      sites(1)%oldest_patch => patch
-
-      allocate(bc_in(1)%filter_photo_pa(1))
-      ! FATES photosynthesis filter flag 3 indicates active photosynthesis on vegetated patch
-      bc_in(1)%filter_photo_pa(1) = 3
-      ! Timestep duration of 1 hour (3600s) + 0.2s offset (unreferenced dummy argument in AccumulateFluxes_ED)
       dt_time = 3600.2_r8
 
       call AccumulateFluxes_ED(nsites, sites, bc_in, bc_out, dt_time)
@@ -383,25 +269,12 @@ module test_EDAccumulateFluxes
       type(fates_cohort_type), pointer :: cohort
       real(r8) :: dt_time
 
-      allocate(patch)
-      allocate(cohort)
-      call cohort%CreateBare(pft=1, nn=0.1_r8, height=10.0_r8)
+      call CreateTestSite(sites, patch, cohort, bc_in, heights=[10.0_r8])
 
-      patch%patchno = 1
-      patch%nocomp_pft_label = 1
-
-      cohort%gpp_acc = 1.0_r8
-      cohort%gpp_tstep = 0.5_r8
-      cohort%resp_m_acc = 0.2_r8
-      cohort%resp_m_tstep = 0.1_r8
-      cohort%sym_nfix_daily = 0.05_r8
-      cohort%sym_nfix_tstep = 0.02_r8
-      cohort%c13disc_acc = 0.1_r8
-      cohort%c13disc_clm = 0.2_r8
-      ! Three canopy leaf layers for vertical canopy structure testing
-      cohort%nv = 3
+      call SetTestFluxes(cohort, gpp_acc=1.0_r8, gpp_tstep=0.5_r8, resp_m_acc=0.2_r8, &
+                         resp_m_tstep=0.1_r8, sym_nfix_daily=0.05_r8, sym_nfix_tstep=0.02_r8, &
+                         c13disc_acc=0.1_r8, c13disc_clm=0.2_r8, nv=3)
       cohort%year_net_uptake(1) = 0.1_r8
-      ! Uninitialized sentinel flag 999.0_r8 used in FATES to indicate unassigned net uptake state
       cohort%year_net_uptake(2) = 999.0_r8
       cohort%year_net_uptake(3) = 0.3_r8
 
@@ -409,15 +282,6 @@ module test_EDAccumulateFluxes
       cohort%ts_net_uptake(2) = 0.4_r8
       cohort%ts_net_uptake(3) = 0.2_r8
 
-      cohort%taller => null()
-      patch%shortest => cohort
-      patch%younger => null()
-      sites(1)%oldest_patch => patch
-
-      allocate(bc_in(1)%filter_photo_pa(1))
-      ! FATES photosynthesis filter flag 3 indicates active photosynthesis on vegetated patch
-      bc_in(1)%filter_photo_pa(1) = 3
-      ! Timestep duration of 1 hour (3600s) + 0.2s offset (unreferenced dummy argument in AccumulateFluxes_ED)
       dt_time = 3600.2_r8
 
       call AccumulateFluxes_ED(nsites, sites, bc_in, bc_out, dt_time)
@@ -455,33 +319,19 @@ module test_EDAccumulateFluxes
 
       patch_old%patchno = 1
       patch_old%nocomp_pft_label = 1
-      cohort_old%gpp_acc = 1.0_r8
-      cohort_old%gpp_tstep = 0.5_r8
-      cohort_old%resp_m_acc = 0.2_r8
-      cohort_old%resp_m_tstep = 0.1_r8
-      cohort_old%sym_nfix_daily = 0.05_r8
-      cohort_old%sym_nfix_tstep = 0.02_r8
-      cohort_old%c13disc_acc = 0.1_r8
-      cohort_old%c13disc_clm = 0.2_r8
-      cohort_old%nv = 1
-      cohort_old%year_net_uptake(1) = 0.2_r8
-      cohort_old%ts_net_uptake(1) = 0.5_r8
+      call SetTestFluxes(cohort_old, gpp_acc=1.0_r8, gpp_tstep=0.5_r8, resp_m_acc=0.2_r8, &
+                         resp_m_tstep=0.1_r8, sym_nfix_daily=0.05_r8, sym_nfix_tstep=0.02_r8, &
+                         c13disc_acc=0.1_r8, c13disc_clm=0.2_r8, year_net_uptake=0.2_r8, &
+                         ts_net_uptake=0.5_r8, nv=1)
       cohort_old%taller => null()
       patch_old%shortest => cohort_old
 
       patch_young%patchno = 2
       patch_young%nocomp_pft_label = 1
-      cohort_young%gpp_acc = 2.0_r8
-      cohort_young%gpp_tstep = 1.0_r8
-      cohort_young%resp_m_acc = 0.4_r8
-      cohort_young%resp_m_tstep = 0.2_r8
-      cohort_young%sym_nfix_daily = 0.10_r8
-      cohort_young%sym_nfix_tstep = 0.04_r8
-      cohort_young%c13disc_acc = 0.1_r8
-      cohort_young%c13disc_clm = 0.2_r8
-      cohort_young%nv = 1
-      cohort_young%year_net_uptake(1) = 0.4_r8
-      cohort_young%ts_net_uptake(1) = 1.0_r8
+      call SetTestFluxes(cohort_young, gpp_acc=2.0_r8, gpp_tstep=1.0_r8, resp_m_acc=0.4_r8, &
+                         resp_m_tstep=0.2_r8, sym_nfix_daily=0.10_r8, sym_nfix_tstep=0.04_r8, &
+                         c13disc_acc=0.1_r8, c13disc_clm=0.2_r8, year_net_uptake=0.4_r8, &
+                         ts_net_uptake=1.0_r8, nv=1)
       cohort_young%taller => null()
       patch_young%shortest => cohort_young
 
@@ -524,35 +374,13 @@ module test_EDAccumulateFluxes
       type(fates_cohort_type), pointer :: cohort
       real(r8) :: dt_time
 
-      allocate(patch)
-      allocate(cohort)
-      call cohort%CreateBare(pft=1, nn=0.1_r8, height=10.0_r8)
+      call CreateTestSite(sites, patch, cohort, bc_in, heights=[10.0_r8])
 
-      patch%patchno = 1
-      patch%nocomp_pft_label = 1
+      call SetTestFluxes(cohort, gpp_acc=1.0e-16_r8, gpp_tstep=-1.0e-16_r8, resp_m_acc=0.2_r8, &
+                         resp_m_tstep=0.1_r8, sym_nfix_daily=0.05_r8, sym_nfix_tstep=0.02_r8, &
+                         c13disc_acc=0.1_r8, c13disc_clm=0.2_r8, year_net_uptake=0.2_r8, &
+                         ts_net_uptake=0.5_r8, nv=1)
 
-      ! Subnormal floating point fixture values (1e-16_r8)
-      cohort%gpp_acc = 1.0e-16_r8
-      cohort%gpp_tstep = -1.0e-16_r8
-      cohort%resp_m_acc = 0.2_r8
-      cohort%resp_m_tstep = 0.1_r8
-      cohort%sym_nfix_daily = 0.05_r8
-      cohort%sym_nfix_tstep = 0.02_r8
-      cohort%c13disc_acc = 0.1_r8
-      cohort%c13disc_clm = 0.2_r8
-      cohort%nv = 1
-      cohort%year_net_uptake(1) = 0.2_r8
-      cohort%ts_net_uptake(1) = 0.5_r8
-
-      cohort%taller => null()
-      patch%shortest => cohort
-      patch%younger => null()
-      sites(1)%oldest_patch => patch
-
-      allocate(bc_in(1)%filter_photo_pa(1))
-      ! FATES photosynthesis filter flag 3 indicates active photosynthesis on vegetated patch
-      bc_in(1)%filter_photo_pa(1) = 3
-      ! Timestep duration of 1 hour (3600s) + 0.2s offset (unreferenced dummy argument in AccumulateFluxes_ED)
       dt_time = 3600.2_r8
 
       call AccumulateFluxes_ED(nsites, sites, bc_in, bc_out, dt_time)
@@ -579,57 +407,20 @@ module test_EDAccumulateFluxes
       type(fates_cohort_type), pointer :: cohort1, cohort2
       real(r8) :: dt_time
 
-      allocate(patch1)
-      allocate(cohort1)
-      call cohort1%CreateBare(pft=1, nn=0.1_r8, height=10.0_r8)
-      allocate(patch2)
-      allocate(cohort2)
-      call cohort2%CreateBare(pft=1, nn=0.1_r8, height=10.0_r8)
-
       ! Site 1
-      patch1%patchno = 1
-      patch1%nocomp_pft_label = 1
-      cohort1%gpp_acc = 1.0_r8
-      cohort1%gpp_tstep = 0.5_r8
-      cohort1%resp_m_acc = 0.2_r8
-      cohort1%resp_m_tstep = 0.1_r8
-      cohort1%sym_nfix_daily = 0.05_r8
-      cohort1%sym_nfix_tstep = 0.02_r8
-      cohort1%c13disc_acc = 0.1_r8
-      cohort1%c13disc_clm = 0.2_r8
-      cohort1%nv = 1
-      cohort1%year_net_uptake(1) = 0.2_r8
-      cohort1%ts_net_uptake(1) = 0.5_r8
-      cohort1%taller => null()
-      patch1%shortest => cohort1
-      patch1%younger => null()
-      sites(1)%oldest_patch => patch1
+      call CreateTestSite(sites(1:1), patch1, cohort1, bc_in(1:1), heights=[10.0_r8])
+      call SetTestFluxes(cohort1, gpp_acc=1.0_r8, gpp_tstep=0.5_r8, resp_m_acc=0.2_r8, &
+                         resp_m_tstep=0.1_r8, sym_nfix_daily=0.05_r8, sym_nfix_tstep=0.02_r8, &
+                         c13disc_acc=0.1_r8, c13disc_clm=0.2_r8, year_net_uptake=0.2_r8, &
+                         ts_net_uptake=0.5_r8, nv=1)
 
       ! Site 2
-      patch2%patchno = 1
-      patch2%nocomp_pft_label = 1
-      cohort2%gpp_acc = 5.0_r8
-      cohort2%gpp_tstep = 2.0_r8
-      cohort2%resp_m_acc = 1.0_r8
-      cohort2%resp_m_tstep = 0.4_r8
-      cohort2%sym_nfix_daily = 0.1_r8
-      cohort2%sym_nfix_tstep = 0.05_r8
-      cohort2%c13disc_acc = 0.1_r8
-      cohort2%c13disc_clm = 0.2_r8
-      cohort2%nv = 1
-      cohort2%year_net_uptake(1) = 1.0_r8
-      cohort2%ts_net_uptake(1) = 2.0_r8
-      cohort2%taller => null()
-      patch2%shortest => cohort2
-      patch2%younger => null()
-      sites(2)%oldest_patch => patch2
+      call CreateTestSite(sites(2:2), patch2, cohort2, bc_in(2:2), heights=[10.0_r8])
+      call SetTestFluxes(cohort2, gpp_acc=5.0_r8, gpp_tstep=2.0_r8, resp_m_acc=1.0_r8, &
+                         resp_m_tstep=0.4_r8, sym_nfix_daily=0.1_r8, sym_nfix_tstep=0.05_r8, &
+                         c13disc_acc=0.1_r8, c13disc_clm=0.2_r8, year_net_uptake=1.0_r8, &
+                         ts_net_uptake=2.0_r8, nv=1)
 
-      allocate(bc_in(1)%filter_photo_pa(1))
-      allocate(bc_in(2)%filter_photo_pa(1))
-      ! FATES photosynthesis filter flag 3 indicates active photosynthesis on vegetated patch
-      bc_in(1)%filter_photo_pa(1) = 3
-      bc_in(2)%filter_photo_pa(1) = 3
-      ! Timestep duration of 1 hour (3600s) + 0.2s offset (unreferenced dummy argument in AccumulateFluxes_ED)
       dt_time = 3600.2_r8
 
       call AccumulateFluxes_ED(nsites, sites, bc_in, bc_out, dt_time)
@@ -704,35 +495,13 @@ module test_EDAccumulateFluxes
       type(fates_cohort_type), pointer :: cohort
       real(r8) :: dt_time
 
-      allocate(patch)
-      allocate(cohort)
-      call cohort%CreateBare(pft=1, nn=0.1_r8, height=10.0_r8)
+      call CreateTestSite(sites, patch, cohort, bc_in, heights=[10.0_r8])
 
-      patch%patchno = 1
-      patch%nocomp_pft_label = 1
+      call SetTestFluxes(cohort, gpp_acc=0.0_r8, gpp_tstep=-0.5_r8, resp_m_acc=0.2_r8, &
+                         resp_m_tstep=0.1_r8, sym_nfix_daily=0.05_r8, sym_nfix_tstep=0.02_r8, &
+                         c13disc_acc=0.1_r8, c13disc_clm=0.2_r8, year_net_uptake=0.2_r8, &
+                         ts_net_uptake=0.5_r8, nv=1)
 
-      ! Negative total accumulated GPP
-      cohort%gpp_acc = 0.0_r8
-      cohort%gpp_tstep = -0.5_r8
-      cohort%resp_m_acc = 0.2_r8
-      cohort%resp_m_tstep = 0.1_r8
-      cohort%sym_nfix_daily = 0.05_r8
-      cohort%sym_nfix_tstep = 0.02_r8
-      cohort%c13disc_acc = 0.1_r8
-      cohort%c13disc_clm = 0.2_r8
-      cohort%nv = 1
-      cohort%year_net_uptake(1) = 0.2_r8
-      cohort%ts_net_uptake(1) = 0.5_r8
-
-      cohort%taller => null()
-      patch%shortest => cohort
-      patch%younger => null()
-      sites(1)%oldest_patch => patch
-
-      allocate(bc_in(1)%filter_photo_pa(1))
-      ! FATES photosynthesis filter flag 3 indicates active photosynthesis on vegetated patch
-      bc_in(1)%filter_photo_pa(1) = 3
-      ! Timestep duration of 1 hour (3600s) + 0.2s offset (unreferenced dummy argument in AccumulateFluxes_ED)
       dt_time = 3600.2_r8
 
       call AccumulateFluxes_ED(nsites, sites, bc_in, bc_out, dt_time)
@@ -762,35 +531,13 @@ module test_EDAccumulateFluxes
       type(fates_cohort_type), pointer :: cohort
       real(r8) :: dt_time
 
-      allocate(patch)
-      allocate(cohort)
-      call cohort%CreateBare(pft=1, nn=0.1_r8, height=10.0_r8)
+      call CreateTestSite(sites, patch, cohort, bc_in, heights=[10.0_r8])
 
-      patch%patchno = 1
-      patch%nocomp_pft_label = 1
+      call SetTestFluxes(cohort, gpp_acc=1.0_r8, gpp_tstep=0.5_r8, resp_m_acc=0.2_r8, &
+                         resp_m_tstep=0.1_r8, sym_nfix_daily=0.05_r8, sym_nfix_tstep=0.02_r8, &
+                         c13disc_acc=0.1_r8, c13disc_clm=0.2_r8, year_net_uptake=0.2_r8, &
+                         ts_net_uptake=0.5_r8, nv=0)
 
-      cohort%gpp_acc = 1.0_r8
-      cohort%gpp_tstep = 0.5_r8
-      cohort%resp_m_acc = 0.2_r8
-      cohort%resp_m_tstep = 0.1_r8
-      cohort%sym_nfix_daily = 0.05_r8
-      cohort%sym_nfix_tstep = 0.02_r8
-      cohort%c13disc_acc = 0.1_r8
-      cohort%c13disc_clm = 0.2_r8
-      ! Zero canopy leaf layers
-      cohort%nv = 0
-      cohort%year_net_uptake(1) = 0.2_r8
-      cohort%ts_net_uptake(1) = 0.5_r8
-
-      cohort%taller => null()
-      patch%shortest => cohort
-      patch%younger => null()
-      sites(1)%oldest_patch => patch
-
-      allocate(bc_in(1)%filter_photo_pa(1))
-      ! FATES photosynthesis filter flag 3 indicates active photosynthesis on vegetated patch
-      bc_in(1)%filter_photo_pa(1) = 3
-      ! Timestep duration of 1 hour (3600s) + 0.2s offset (unreferenced dummy argument in AccumulateFluxes_ED)
       dt_time = 3600.2_r8
 
       call AccumulateFluxes_ED(nsites, sites, bc_in, bc_out, dt_time)
@@ -819,52 +566,20 @@ module test_EDAccumulateFluxes
       type(fates_cohort_type), pointer :: cohort_pft1, cohort_pft2
       real(r8) :: dt_time
 
-      allocate(patch)
-      allocate(cohort_pft1)
-      call cohort_pft1%CreateBare(pft=1, nn=0.1_r8, height=10.0_r8)
-      allocate(cohort_pft2)
-      call cohort_pft2%CreateBare(pft=2, nn=0.1_r8, height=10.0_r8)
+      call CreateTestSite(sites, patch, cohort_pft1, bc_in, heights=[10.0_r8, 10.0_r8], pft=1)
+      cohort_pft2 => cohort_pft1%taller
+      cohort_pft2%pft = 2
 
-      patch%patchno = 1
-      patch%nocomp_pft_label = 1
+      call SetTestFluxes(cohort_pft1, gpp_acc=1.0_r8, gpp_tstep=0.5_r8, resp_m_acc=0.2_r8, &
+                         resp_m_tstep=0.1_r8, sym_nfix_daily=0.05_r8, sym_nfix_tstep=0.02_r8, &
+                         c13disc_acc=0.1_r8, c13disc_clm=0.2_r8, year_net_uptake=0.2_r8, &
+                         ts_net_uptake=0.5_r8, nv=1)
 
-      ! Cohort 1: PFT label 1
-      cohort_pft1%gpp_acc = 1.0_r8
-      cohort_pft1%gpp_tstep = 0.5_r8
-      cohort_pft1%resp_m_acc = 0.2_r8
-      cohort_pft1%resp_m_tstep = 0.1_r8
-      cohort_pft1%sym_nfix_daily = 0.05_r8
-      cohort_pft1%sym_nfix_tstep = 0.02_r8
-      cohort_pft1%c13disc_acc = 0.1_r8
-      cohort_pft1%c13disc_clm = 0.2_r8
-      cohort_pft1%nv = 1
-      cohort_pft1%year_net_uptake(1) = 0.2_r8
-      cohort_pft1%ts_net_uptake(1) = 0.5_r8
+      call SetTestFluxes(cohort_pft2, gpp_acc=3.0_r8, gpp_tstep=1.5_r8, resp_m_acc=0.6_r8, &
+                         resp_m_tstep=0.3_r8, sym_nfix_daily=0.15_r8, sym_nfix_tstep=0.06_r8, &
+                         c13disc_acc=0.1_r8, c13disc_clm=0.2_r8, year_net_uptake=0.6_r8, &
+                         ts_net_uptake=1.5_r8, nv=1)
 
-      ! Cohort 2: PFT label 2
-      cohort_pft2%gpp_acc = 3.0_r8
-      cohort_pft2%gpp_tstep = 1.5_r8
-      cohort_pft2%resp_m_acc = 0.6_r8
-      cohort_pft2%resp_m_tstep = 0.3_r8
-      cohort_pft2%sym_nfix_daily = 0.15_r8
-      cohort_pft2%sym_nfix_tstep = 0.06_r8
-      cohort_pft2%c13disc_acc = 0.1_r8
-      cohort_pft2%c13disc_clm = 0.2_r8
-      cohort_pft2%nv = 1
-      cohort_pft2%year_net_uptake(1) = 0.6_r8
-      cohort_pft2%ts_net_uptake(1) = 1.5_r8
-
-      ! Link PFT1 -> PFT2 -> null
-      cohort_pft1%taller => cohort_pft2
-      cohort_pft2%taller => null()
-      patch%shortest => cohort_pft1
-      patch%younger => null()
-      sites(1)%oldest_patch => patch
-
-      allocate(bc_in(1)%filter_photo_pa(1))
-      ! FATES photosynthesis filter flag 3 indicates active photosynthesis on vegetated patch
-      bc_in(1)%filter_photo_pa(1) = 3
-      ! Timestep duration of 1 hour (3600s) + 0.2s offset (unreferenced dummy argument in AccumulateFluxes_ED)
       dt_time = 3600.2_r8
 
       call AccumulateFluxes_ED(nsites, sites, bc_in, bc_out, dt_time)
@@ -908,13 +623,13 @@ module test_EDAccumulateFluxes
       ! Patch 1 with 2 cohorts
       patch1%patchno = 1
       patch1%nocomp_pft_label = 1
-      c1_p1%gpp_acc = 1.0_r8; c1_p1%gpp_tstep = 0.5_r8; c1_p1%resp_m_acc = 0.2_r8; c1_p1%resp_m_tstep = 0.1_r8
-      c1_p1%sym_nfix_daily = 0.05_r8; c1_p1%sym_nfix_tstep = 0.02_r8; c1_p1%c13disc_acc = 0.1_r8; c1_p1%c13disc_clm = 0.2_r8
-      c1_p1%nv = 1; c1_p1%year_net_uptake(1) = 0.2_r8; c1_p1%ts_net_uptake(1) = 0.5_r8
+      call SetTestFluxes(c1_p1, gpp_acc=1.0_r8, gpp_tstep=0.5_r8, resp_m_acc=0.2_r8, resp_m_tstep=0.1_r8, &
+                         sym_nfix_daily=0.05_r8, sym_nfix_tstep=0.02_r8, c13disc_acc=0.1_r8, c13disc_clm=0.2_r8, &
+                         year_net_uptake=0.2_r8, ts_net_uptake=0.5_r8, nv=1)
 
-      c2_p1%gpp_acc = 2.0_r8; c2_p1%gpp_tstep = 1.0_r8; c2_p1%resp_m_acc = 0.4_r8; c2_p1%resp_m_tstep = 0.2_r8
-      c2_p1%sym_nfix_daily = 0.1_r8; c2_p1%sym_nfix_tstep = 0.04_r8; c2_p1%c13disc_acc = 0.1_r8; c2_p1%c13disc_clm = 0.2_r8
-      c2_p1%nv = 1; c2_p1%year_net_uptake(1) = 0.4_r8; c2_p1%ts_net_uptake(1) = 1.0_r8
+      call SetTestFluxes(c2_p1, gpp_acc=2.0_r8, gpp_tstep=1.0_r8, resp_m_acc=0.4_r8, resp_m_tstep=0.2_r8, &
+                         sym_nfix_daily=0.1_r8, sym_nfix_tstep=0.04_r8, c13disc_acc=0.1_r8, c13disc_clm=0.2_r8, &
+                         year_net_uptake=0.4_r8, ts_net_uptake=1.0_r8, nv=1)
 
       c1_p1%taller => c2_p1
       c2_p1%taller => null()
@@ -923,13 +638,13 @@ module test_EDAccumulateFluxes
       ! Patch 2 with 2 cohorts
       patch2%patchno = 2
       patch2%nocomp_pft_label = 1
-      c1_p2%gpp_acc = 3.0_r8; c1_p2%gpp_tstep = 1.5_r8; c1_p2%resp_m_acc = 0.6_r8; c1_p2%resp_m_tstep = 0.3_r8
-      c1_p2%sym_nfix_daily = 0.15_r8; c1_p2%sym_nfix_tstep = 0.06_r8; c1_p2%c13disc_acc = 0.1_r8; c1_p2%c13disc_clm = 0.2_r8
-      c1_p2%nv = 1; c1_p2%year_net_uptake(1) = 0.6_r8; c1_p2%ts_net_uptake(1) = 1.5_r8
+      call SetTestFluxes(c1_p2, gpp_acc=3.0_r8, gpp_tstep=1.5_r8, resp_m_acc=0.6_r8, resp_m_tstep=0.3_r8, &
+                         sym_nfix_daily=0.15_r8, sym_nfix_tstep=0.06_r8, c13disc_acc=0.1_r8, c13disc_clm=0.2_r8, &
+                         year_net_uptake=0.6_r8, ts_net_uptake=1.5_r8, nv=1)
 
-      c2_p2%gpp_acc = 4.0_r8; c2_p2%gpp_tstep = 2.0_r8; c2_p2%resp_m_acc = 0.8_r8; c2_p2%resp_m_tstep = 0.4_r8
-      c2_p2%sym_nfix_daily = 0.20_r8; c2_p2%sym_nfix_tstep = 0.08_r8; c2_p2%c13disc_acc = 0.1_r8; c2_p2%c13disc_clm = 0.2_r8
-      c2_p2%nv = 1; c2_p2%year_net_uptake(1) = 0.8_r8; c2_p2%ts_net_uptake(1) = 2.0_r8
+      call SetTestFluxes(c2_p2, gpp_acc=4.0_r8, gpp_tstep=2.0_r8, resp_m_acc=0.8_r8, resp_m_tstep=0.4_r8, &
+                         sym_nfix_daily=0.20_r8, sym_nfix_tstep=0.08_r8, c13disc_acc=0.1_r8, c13disc_clm=0.2_r8, &
+                         year_net_uptake=0.8_r8, ts_net_uptake=2.0_r8, nv=1)
 
       c1_p2%taller => c2_p2
       c2_p2%taller => null()
