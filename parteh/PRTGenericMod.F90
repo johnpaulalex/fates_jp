@@ -610,6 +610,8 @@ contains
     integer :: i_organ   ! The global organ id for this variable
     integer :: i_element ! The global element id for this variable
 
+    if (.not. associated(prt_global)) return
+
     do i_var = 1, prt_global%num_vars
 
        n_cor_ids = size(this%variables(i_var)%val,1)
