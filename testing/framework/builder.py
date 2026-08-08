@@ -150,11 +150,11 @@ class TestBuilder:
 
     def _find_libraries(self):
         """Locates PFUNIT and NETCDF paths."""
-        self.config.pfunit_path = self._query_makefile_var("PFUNIT_PATH")
+        self.config.pfunit_path = self._query_makefile_var("PFUNIT_PATH") or os.environ.get("PFUNIT_PATH")
 
         if "NETCDF" not in os.environ:
-            self.config.netcdf_c_path = self._query_makefile_var("NETCDF_C_PATH")
-            self.config.netcdf_f_path = self._query_makefile_var("NETCDF_FORTRAN_PATH")
+            self.config.netcdf_c_path = self._query_makefile_var("NETCDF_C_PATH") or os.environ.get("NETCDF_C_PATH")
+            self.config.netcdf_f_path = self._query_makefile_var("NETCDF_FORTRAN_PATH") or os.environ.get("NETCDF_FORTRAN_PATH")
 
     def _query_makefile_var(self, var_name: str) -> Optional[str]:
         """Helper to query variables from CIME makefile generation

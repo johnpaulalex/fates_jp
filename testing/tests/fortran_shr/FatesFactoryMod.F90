@@ -391,7 +391,7 @@ module FatesFactoryMod
     call PRTFactory(prt, pft, c_struct, c_leaf, c_fnrt, c_sapw, c_store)
     
     ! create the cohort using lightweight CreateBare constructor
-    call cohort%CreateBare(prt=prt, pft=pft, nn=number_local, height=height, age=age_local, &
+    call cohort%CreateBare(prt=prt, pft=pft, nn=number_local, height=height, coage=age_local, &
       dbh=dbh_local, status=status_local, ctrim=canopy_trim_local, carea=can_area,          &
       clayer=canopy_layer_local, crowndamage=crown_damage_local)
   
@@ -514,6 +514,7 @@ module FatesFactoryMod
     
     ! LOCALS:
     type(fates_cohort_type), pointer :: cohort, next_cohort ! cohort objects
+    class(prt_vartypes),      pointer :: null_prt => null() ! null pointer fallback for CreateBare
     integer                          :: num_cohorts         ! number of cohorts to add to list 
     integer                          :: i                   ! looping index
     
@@ -531,9 +532,9 @@ module FatesFactoryMod
     allocate(cohort)
     ! Default nominal PFT = 1 and density = 0.1 /m2 for synthetic test patch list
     if (present(dbhs)) then
-      call cohort%CreateBare(prt=null(), pft=1, nn=0.1_r8, height=heights(1), dbh=dbhs(1))
+      call cohort%CreateBare(prt=null_prt, pft=1, nn=0.1_r8, height=heights(1), dbh=dbhs(1))
     else
-      call cohort%CreateBare(prt=null(), pft=1, nn=0.1_r8, height=heights(1))
+      call cohort%CreateBare(prt=null_prt, pft=1, nn=0.1_r8, height=heights(1))
     endif
     patch%shortest => cohort
     
@@ -541,9 +542,9 @@ module FatesFactoryMod
     do i = 2, num_cohorts
       allocate(next_cohort)
       if (present(dbhs)) then
-        call next_cohort%CreateBare(prt=null(), pft=1, nn=0.1_r8, height=heights(i), dbh=dbhs(i))
+        call next_cohort%CreateBare(prt=null_prt, pft=1, nn=0.1_r8, height=heights(i), dbh=dbhs(i))
       else
-        call next_cohort%CreateBare(prt=null(), pft=1, nn=0.1_r8, height=heights(i))
+        call next_cohort%CreateBare(prt=null_prt, pft=1, nn=0.1_r8, height=heights(i))
       endif
       cohort%taller => next_cohort
       next_cohort%shorter => cohort

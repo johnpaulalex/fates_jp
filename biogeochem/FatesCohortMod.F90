@@ -621,8 +621,8 @@ module FatesCohortMod
         this%efstem_coh = 1.0_r8
       endif
 
-      if (this%dbh <= 0._r8 .or. this%n == 0._r8 .or. this%pft == 0) then
-        write(fates_log(),*) 'FATES: something is zero in cohort%InitRaw',      &
+      if (this%dbh < 0._r8 .or. this%n < 0._r8 .or. this%pft < 0) then
+        write(fates_log(),*) 'FATES: something is negative in cohort%InitRaw',  &
           this%dbh, this%n, this%pft
         call endrun(msg=errMsg(sourcefile, __LINE__))
       endif
@@ -647,7 +647,11 @@ module FatesCohortMod
       real(r8) :: treesai     ! stem area index within crown [m2/m2]
 
       ! Initialize the leaf to fineroot biomass ratio.
-      this%l2fr = prt_params%allom_l2fr(this%pft)
+      if (allocated(prt_params%allom_l2fr)) then
+        this%l2fr = prt_params%allom_l2fr(this%pft)
+      else
+        this%l2fr = 1.0_r8
+      endif
 
       if (hlm_parteh_mode == carbon_nitrogen_phosphorus) then
         this%cx_int      = 0._r8  ! Assume balanced N,P/C stores ie log(1) = 0
@@ -739,24 +743,28 @@ module FatesCohortMod
       ! cohort without calling allometry routines or querying global parameter infrastructure.
       
       ! ARGUMENTS
-      class(fates_cohort_type), intent(inout), target  :: this             ! cohort object
-      class(prt_vartypes),      intent(inout), pointer :: prt              ! The allocated PARTEH object
-      integer,                  intent(in)             :: pft              ! cohort Plant Functional Type
-      real(r8),                 intent(in)             :: nn               ! number of individuals in cohort [/m2]
-      real(r8),                 intent(in)             :: height           ! cohort height [m]
-      real(r8),                 intent(in), optional   :: coage            ! cohort age [yr]
-      real(r8),                 intent(in), optional   :: dbh              ! cohort diameter at breast height [cm]
-      integer,                  intent(in), optional   :: status           ! growth status [leaves on/off]
-      real(r8),                 intent(in), optional   :: ctrim            ! fraction of maximum leaf biomass 
-      real(r8),                 intent(in), optional   :: carea            ! area of cohort [m2]
-      integer,                  intent(in), optional   :: clayer           ! canopy layer status
-      integer,                  intent(in), optional   :: crowndamage      ! crown damage class
-      real(r8),                 intent(in), optional   :: treelai          ! leaf area index [m2/m2]
-      real(r8),                 intent(in), optional   :: treesai          ! stem area index [m2/m2]
-      real(r8),                 intent(in), optional   :: vcmax25top       ! max carboxylation rate at top
+      class(fates_cohort_type), intent(inout), target            :: this             ! cohort object
+      class(prt_vartypes),      intent(inout), pointer, optional :: prt              ! The allocated PARTEH object
+      integer,                  intent(in)                       :: pft              ! cohort Plant Functional Type
+      real(r8),                 intent(in)                       :: nn               ! number of individuals in cohort [/m2]
+      real(r8),                 intent(in)                       :: height           ! cohort height [m]
+      real(r8),                 intent(in), optional             :: coage            ! cohort age [yr]
+      real(r8),                 intent(in), optional             :: dbh              ! cohort diameter at breast height [cm]
+      integer,                  intent(in), optional             :: status           ! growth status [leaves on/off]
+      real(r8),                 intent(in), optional             :: ctrim            ! fraction of maximum leaf biomass 
+      real(r8),                 intent(in), optional             :: carea            ! area of cohort [m2]
+      integer,                  intent(in), optional             :: clayer           ! canopy layer status
+      integer,                  intent(in), optional             :: crowndamage      ! crown damage class
+      real(r8),                 intent(in), optional             :: treelai          ! leaf area index [m2/m2]
+      real(r8),                 intent(in), optional             :: treesai          ! stem area index [m2/m2]
+      real(r8),                 intent(in), optional             :: vcmax25top       ! max carboxylation rate at top
 
       real(r8) :: local_coage, local_dbh, local_ctrim, local_carea
       integer  :: local_status, local_clayer, local_crowndamage
+      class(prt_vartypes), pointer :: local_prt
+
+      nullify(local_prt)
+      if (present(prt)) local_prt => prt
 
       ! Default nominal fallback values for optional unit test arguments
       local_coage       = 0.0_r8; if (present(coage))       local_coage       = coage
@@ -773,7 +781,7 @@ module FatesCohortMod
       ! Default crown damage = 1 (undamaged) for synthetic testing
       local_crowndamage = 1;      if (present(crowndamage)) local_crowndamage = crowndamage
 
-      call this%InitRaw(prt, pft, nn, height, local_coage, local_dbh, local_status, &
+      call this%InitRaw(local_prt, pft, nn, height, local_coage, local_dbh, local_status, &
         local_ctrim, local_clayer, local_crowndamage)
 
       if (present(carea))      this%c_area     = carea
