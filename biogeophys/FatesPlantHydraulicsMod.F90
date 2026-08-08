@@ -246,11 +246,13 @@ module FatesPlantHydraulicsMod
   !
   ! !PUBLIC MEMBER FUNCTIONS:
   public :: AccumulateMortalityWaterStorage
+  public :: AccumulateMortalityWater_explicit
   public :: RecruitWaterStorage
   public :: hydraulics_drive
   public :: InitHydrSites
   public :: HydrSiteColdStart
   public :: BTranForHLMDiagnosticsFromCohortHydr
+  public :: BTranForHLMDiagnostics_explicit
   public :: InitHydrCohort
   public :: DeallocateHydrCohort
   public :: UpdateH2OVeg
@@ -258,6 +260,7 @@ module FatesPlantHydraulicsMod
   public :: UpdateSizeDepPlantHydProps
   public :: UpdateSizeDepPlantHydStates
   public :: UpdatePlantPsiFTCFromTheta
+  public :: UpdatePlantPsiFTCFromTheta_explicit
 
   interface UpdatePlantPsiFTCFromTheta
      module procedure UpdatePlantPsiFTCFromTheta_cohort
@@ -271,6 +274,7 @@ module FatesPlantHydraulicsMod
 
   public :: UpdatePlantHydrNodes
   public :: UpdatePlantHydrLenVol
+  public :: UpdatePlantHydrLenVol_masses
 
   interface UpdatePlantHydrLenVol
      module procedure UpdatePlantHydrLenVol_cohort
@@ -278,12 +282,14 @@ module FatesPlantHydraulicsMod
   end interface UpdatePlantHydrLenVol
 
   public :: UpdatePlantKmax
+  public :: UpdatePlantKmax_explicit
 
   interface UpdatePlantKmax
      module procedure UpdatePlantKmax_cohort
      module procedure UpdatePlantKmax_explicit
   end interface UpdatePlantKmax
   public :: ConstrainRecruitNumber
+  public :: MatSolve2D_explicit
   public :: InitHydroGlobals
   public :: OrderLayersForSolve1D, wrf_plant, wkf_plant
   public :: shellGeom
@@ -2231,6 +2237,31 @@ subroutine BTranForHLMDiagnosticsFromCohortHydr(nsites,sites,bc_out)
   end do
   return
 end subroutine BTranForHLMDiagnosticsFromCohortHydr
+
+subroutine BTranForHLMDiagnostics_explicit(ncohorts, btran_cohort, balive_cohort, n_indiv, btran_pa)
+
+  ! Arguments
+  integer,  intent(in)  :: ncohorts
+  real(r8), intent(in)  :: btran_cohort(:), balive_cohort(:), n_indiv(:)
+  real(r8), intent(out) :: btran_pa
+
+  ! Locals
+  integer  :: c
+  real(r8) :: total_balive, weighted_btran
+
+  total_balive = 0.0_r8
+  weighted_btran = 0.0_r8
+  do c = 1, ncohorts
+     total_balive   = total_balive + balive_cohort(c) * n_indiv(c)
+     weighted_btran = weighted_btran + btran_cohort(c) * balive_cohort(c) * n_indiv(c)
+  end do
+
+  if (total_balive > 0.0_r8) then
+     btran_pa = weighted_btran / total_balive
+  else
+     btran_pa = 0.0_r8
+  end if
+end subroutine BTranForHLMDiagnostics_explicit
 
 ! ==========================================================================
 
@@ -4273,6 +4304,22 @@ subroutine AccumulateMortalityWaterStorage(csite,ccohort,delta_n)
    return
 end subroutine AccumulateMortalityWaterStorage
 
+subroutine AccumulateMortalityWater_explicit(delta_n, th_ag, v_ag, th_troot, v_troot, &
+                                              th_aroot, v_aroot_layer, delta_w)
+
+  ! Arguments
+  real(r8), intent(in)  :: delta_n
+  real(r8), intent(in)  :: th_ag(:), v_ag(:)
+  real(r8), intent(in)  :: th_troot, v_troot
+  real(r8), intent(in)  :: th_aroot(:), v_aroot_layer(:)
+  real(r8), intent(out) :: delta_w
+
+  delta_w = (sum(th_ag(:)*v_ag(:)) + &
+             th_troot*v_troot + &
+             sum(th_aroot(:)*v_aroot_layer(:))) * &
+            denh2o * delta_n * AREA_INV
+end subroutine AccumulateMortalityWater_explicit
+
 !-------------------------------------------------------------------------------!
 
 subroutine CalculateTotalAvailW(ccohort,csite_hydr,bc_in,dtime,totalAvailW)
@@ -4833,7 +4880,8 @@ subroutine MatSolve2D(csite_hydr,cohort,cohort_hydr, &
   ! -----------------------------------------------------------------------------------
    type(ed_site_hydr_type), intent(inout),target :: csite_hydr        ! ED csite_hydr structure
    type(ed_cohort_hydr_type), target            :: cohort_hydr
-   type(fates_cohort_type) , intent(inout), target :: cohort
+   integer, intent(in)                          :: ft
+   real(r8), intent(in)                         :: cohort_n
    real(r8),intent(in)                          :: tmx ! time interval to integrate over [s]
    real(r8),intent(in)                          :: qtop
    real(r8),intent(out) :: sapflow                   ! time integrated mass flux between transp-root and stem [kg]
@@ -4984,8 +5032,7 @@ subroutine MatSolve2D(csite_hydr,cohort,cohort_hydr, &
       dth_node     => csite_hydr%dth_node, &
       node_layer   => csite_hydr%node_layer, &
       h_node       => csite_hydr%h_node, &
-      dftc_dpsi_node => csite_hydr%dftc_dpsi_node, &
-      ft           => cohort%pft)
+      dftc_dpsi_node => csite_hydr%dftc_dpsi_node)
 
 
    ! This NaN's the scratch arrays
@@ -5099,7 +5146,7 @@ subroutine MatSolve2D(csite_hydr,cohort,cohort_hydr, &
          write(fates_log(),*) 'could not converge on a solution.'
          write(fates_log(),*) 'Perhaps try increasing iteration cap,'
          write(fates_log(),*) 'and decreasing relaxation factors.'
-         write(fates_log(),*) 'pft: ',ft,' dbh: ',cohort%dbh
+         write(fates_log(),*) 'pft: ',ft
          call endrun(msg=errMsg(sourcefile, __LINE__))
 
       endif
@@ -5491,7 +5538,7 @@ subroutine MatSolve2D(csite_hydr,cohort,cohort_hydr, &
             ishell = k-1
             dth_layershell_site(j,ishell) = dth_layershell_site(j,ishell) + &
                dth_node(inode) * cohort_hydr%l_aroot_layer(j) * &
-               cohort%n / csite_hydr%l_aroot_layer(j)
+               cohort_n / csite_hydr%l_aroot_layer(j)
 
          endif
       enddo
