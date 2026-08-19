@@ -1,0 +1,194 @@
+!> This module contains unit tests for the FatesHydroWTFMod production module,
+!> which defines Water Retention Function (WRF) types and provides methods to 
+!> calculate soil matric potential and related hydraulic properties based on 
+!> different empirical models (e.g., van Genuchten).
+module test_FatesHydroWTF
+  use FatesConstantsMod, only : r8 => fates_r8
+  use FatesHydroWTFMod, only : wrf_type, wrf_type_vg, wrf_type_cch, wrf_type_smooth_cch, wrf_type_tfs
+  use funit
+  implicit none
+
+  @TestCase
+  type, extends(TestCase) :: TestFatesHydroWTF
+  contains
+  end type TestFatesHydroWTF
+
+  contains
+
+    @Test
+    subroutine test_get_thsat(this)
+      class(TestFatesHydroWTF), intent(inout) :: this
+      type(wrf_type_vg) :: vg_obj
+      type(wrf_type_cch) :: cch_obj
+      type(wrf_type_smooth_cch) :: scch_obj
+      type(wrf_type_tfs) :: tfs_obj
+      
+      ! Setup th_sat on all the subclasses
+      vg_obj%th_sat = 0.5_r8
+      cch_obj%th_sat = 0.6_r8
+      scch_obj%th_sat = 0.7_r8
+      tfs_obj%th_sat = 0.8_r8
+
+      ! Note: wrf_type itself does not have a th_sat member and its get_thsat method
+      ! calls fates_endrun, which would abort the test suite. Therefore we only test
+      ! the 4 concrete subclasses that override it properly.
+      
+      @assertEqual(0.5_r8, vg_obj%get_thsat())
+      @assertEqual(0.6_r8, cch_obj%get_thsat())
+      @assertEqual(0.7_r8, scch_obj%get_thsat())
+      @assertEqual(0.8_r8, tfs_obj%get_thsat())
+    end subroutine test_get_thsat
+
+    @Test
+    subroutine test_linear_functions(this)
+      class(TestFatesHydroWTF), intent(inout) :: this
+      type(wrf_type) :: wrf
+      real(r8) :: val, exp_val
+      real(r8) :: th_test, psi_test
+      real(r8), parameter :: tol = 1.0e-14_r8
+
+      ! Setup a base wrf_type object with parameters to test the linear extrapolations
+      wrf%psi_max = -0.1_r8
+      wrf%psi_min = -1.5_r8
+      wrf%dpsidth_max = -0.5_r8
+      wrf%dpsidth_min = -10.0_r8
+      wrf%th_max = 0.45_r8
+      wrf%th_min = 0.15_r8
+
+      ! test get_thmin
+      @assertEqual(0.15_r8, wrf%get_thmin(), tolerance=tol)
+
+      ! test psi_linear_sat
+      th_test = 0.48_r8
+      ! Testing the saturated linear extrapolation formula: psi = psi_max + dpsidth_max * (th - th_max)
+      ! exp_val = -0.1 + (-0.5) * (0.48 - 0.45) = -0.1 - 0.015 = -0.115
+      exp_val = -0.115_r8
+      val = wrf%psi_linear_sat(th_test)
+      @assertEqual(exp_val, val, tolerance=tol)
+
+      ! test psi_linear_res
+      th_test = 0.12_r8
+      ! Testing the residual linear extrapolation formula: psi = psi_min + dpsidth_min * (th - th_min)
+      ! exp_val = -1.5 + (-10.0) * (0.12 - 0.15) = -1.5 + 0.3 = -1.2
+      exp_val = -1.2_r8
+      val = wrf%psi_linear_res(th_test)
+      @assertEqual(exp_val, val, tolerance=tol)
+
+      ! test th_linear_sat
+      psi_test = -0.05_r8
+      ! Testing the inverse saturated extrapolation formula: th = th_max + (psi - psi_max) / dpsidth_max
+      ! exp_val = 0.45 + (-0.05 - (-0.1)) / (-0.5) = 0.45 + (0.05) / (-0.5) = 0.45 - 0.1 = 0.35
+      exp_val = 0.35_r8
+      val = wrf%th_linear_sat(psi_test)
+      @assertEqual(exp_val, val, tolerance=tol)
+
+      ! test th_linear_res
+      psi_test = -2.0_r8
+      ! Testing the inverse residual extrapolation formula: th = th_min + (psi - psi_min) / dpsidth_min
+      ! exp_val = 0.15 + (-2.0 - (-1.5)) / (-10.0) = 0.15 + (-0.5) / (-10.0) = 0.15 + 0.05 = 0.20
+      exp_val = 0.20_r8
+      val = wrf%th_linear_res(psi_test)
+      @assertEqual(exp_val, val, tolerance=tol)
+
+    end subroutine test_linear_functions
+
+    @Test
+    subroutine test_set_min_max_from_satres(this)
+      class(TestFatesHydroWTF), intent(inout) :: this
+      type(wrf_type_vg) :: vg_obj
+      real(r8) :: th_res, th_sat
+      real(r8) :: exp_th_min, exp_th_max
+      real(r8) :: alpha, n_vg, m_vg
+      real(r8) :: Se_max, Se_min, exp_dpsidth_max, exp_dpsidth_min
+      real(r8), parameter :: tol = 1.0e-6_r8
+      
+      ! Parameters needed for van Genuchten (VG) model to successfully setup
+      ! params = [alpha, n_vg, m_vg, th_sat, th_res]
+      real(r8) :: params(5)
+
+      alpha = 0.5_r8
+      n_vg = 1.5_r8
+      m_vg = 0.5_r8
+      th_sat = 0.5_r8
+      th_res = 0.1_r8
+
+      params(1) = alpha
+      params(2) = n_vg
+      params(3) = m_vg
+      params(4) = th_sat
+      params(5) = th_res
+      
+      ! set_wrf_param_vg calls set_min_max_from_satres internally
+      call vg_obj%set_wrf_param(params)
+
+      ! In FatesHydroWTFMod.F90, boundaries for interpolation are defined as:
+      ! min_sf_interp = 0.01 (1% above residual)
+      ! max_sf_interp = 0.998 (99.8% of saturated)
+      ! th_max = max_sf_interp*(th_sat-th_res)+th_res
+      ! th_min = min_sf_interp*(th_sat-th_res)+th_res
+      exp_th_max = 0.998_r8 * (th_sat - th_res) + th_res
+      exp_th_min = 0.01_r8 * (th_sat - th_res) + th_res
+
+      @assertEqual(exp_th_max, vg_obj%th_max, tolerance=tol)
+      @assertEqual(exp_th_min, vg_obj%th_min, tolerance=tol)
+      
+      ! Mathematically compute exact expectation for derivative using the VG closed form:
+      ! dpsi/dth = (1 / (alpha * m_vg * n_vg * (th_sat - th_res))) * (Se**(-1/m_vg - 1)) * ((Se**(-1/m_vg) - 1)**(1/n_vg - 1))
+      Se_max = 0.998_r8
+      Se_min = 0.01_r8
+      
+      exp_dpsidth_max = (1.0_r8 / (alpha * m_vg * n_vg * (th_sat - th_res))) * &
+                        (Se_max**(-1.0_r8/m_vg - 1.0_r8)) * &
+                        ((Se_max**(-1.0_r8/m_vg) - 1.0_r8)**(1.0_r8/n_vg - 1.0_r8))
+                        
+      exp_dpsidth_min = (1.0_r8 / (alpha * m_vg * n_vg * (th_sat - th_res))) * &
+                        (Se_min**(-1.0_r8/m_vg - 1.0_r8)) * &
+                        ((Se_min**(-1.0_r8/m_vg) - 1.0_r8)**(1.0_r8/n_vg - 1.0_r8))
+
+      @assertEqual(exp_dpsidth_max, vg_obj%dpsidth_max, tolerance=tol)
+      @assertEqual(exp_dpsidth_min, vg_obj%dpsidth_min, tolerance=tol)
+
+    end subroutine test_set_min_max_from_satres
+
+    !> Summary: Verifies the Van Genuchten (VG) water retention curve across a gradient of matric potentials
+    @Test
+    subroutine test_vg_sweep(this)
+      class(TestFatesHydroWTF), intent(inout) :: this
+      type(wrf_type_vg) :: vg_obj
+      real(r8) :: params(5)
+      real(r8) :: alpha, n_vg, m_vg, th_sat, th_res
+      real(r8) :: psi_test, expected_theta, actual_theta
+      integer :: i
+      real(r8), parameter :: tol = 1.0e-8_r8
+      
+      ! 1. Define VG parameters
+      alpha = 0.001_r8
+      n_vg = 1.5_r8
+      m_vg = 1.0_r8 - 1.0_r8 / n_vg
+      th_sat = 0.5_r8
+      th_res = 0.1_r8
+      
+      params(1) = alpha
+      params(2) = n_vg
+      params(3) = m_vg
+      params(4) = th_sat
+      params(5) = th_res
+      
+      call vg_obj%set_wrf_param(params)
+      
+      ! 2. Parameter Sweep (Matric Potentials in mm H2O, typically negative)
+      do i = 1, 10
+         ! Generate a range of psi from slightly below saturation to very dry
+         psi_test = -100.0_r8 * (10.0_r8**(real(i, r8) / 2.5_r8)) 
+         
+         ! Analytical Oracle: th = th_res + (th_sat - th_res) / [1 + (alpha * |psi|)^n]^m
+         expected_theta = th_res + (th_sat - th_res) / ((1.0_r8 + (alpha * abs(psi_test))**n_vg)**m_vg)
+         
+         actual_theta = vg_obj%th_from_psi(psi_test)
+         
+         @assertEqual(expected_theta, actual_theta, tol, &
+                      message="Failed Van Genuchten response curve at psi point")
+      end do
+    end subroutine test_vg_sweep
+
+end module test_FatesHydroWTF
