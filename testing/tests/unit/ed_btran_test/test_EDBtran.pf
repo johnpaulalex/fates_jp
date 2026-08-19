@@ -1,0 +1,504 @@
+!> This module contains unit tests for the EDBtranMod production module,
+!> which handles calculations of plant transpiration supply (BTRAN) 
+!> based on soil water potential and root distribution.
+module test_EDBtran
+  use FatesConstantsMod, only : r8 => fates_r8
+  use EDTypesMod, only : ed_site_type
+  use FatesInterfaceTypesMod, only : bc_in_type, bc_out_type
+  use EDBtranMod, only : btran_ed, get_active_suction_layers, check_layer_water
+  use funit
+  implicit none
+
+  @TestCase
+  type, extends(TestCase) :: TestEDBtran
+  contains
+  end type TestEDBtran
+
+  contains
+
+
+    @Test
+    subroutine test_check_layer_water(this)
+      use FatesConstantsMod, only : tfrz => t_water_freeze_k_1atm
+      use EDParamsMod, only : soil_tfrz_thresh
+      class(TestEDBtran), intent(inout) :: this
+      logical :: res
+      
+      ! High liquid water, high temp -> True
+      res = check_layer_water(1.e-3_r8, tfrz + soil_tfrz_thresh + 1.0_r8)
+      @assertTrue(res)
+      
+      ! Low liquid water (<=0), high temp -> False
+      res = check_layer_water(0.0_r8, tfrz + soil_tfrz_thresh + 1.0_r8)
+      @assertFalse(res)
+      res = check_layer_water(-1.e-3_r8, tfrz + soil_tfrz_thresh + 1.0_r8)
+      @assertFalse(res)
+      
+      ! High liquid water, low temp (<= threshold) -> False
+      res = check_layer_water(1.e-3_r8, tfrz + soil_tfrz_thresh - 1.0_r8)
+      @assertFalse(res)
+      res = check_layer_water(1.e-3_r8, tfrz + soil_tfrz_thresh)
+      @assertFalse(res)
+    end subroutine test_check_layer_water
+
+    @Test
+    subroutine test_get_active_suction_layers(this)
+      use FatesConstantsMod, only : tfrz => t_water_freeze_k_1atm
+      use EDParamsMod, only : soil_tfrz_thresh
+      class(TestEDBtran), intent(inout) :: this
+      integer, parameter :: nsites = 1
+      type(ed_site_type), target :: sites(nsites)
+      type(bc_in_type) :: bc_in(nsites)
+      type(bc_out_type) :: bc_out(nsites)
+
+      bc_in(1)%nlevsoil = 2
+      allocate(bc_in(1)%h2o_liqvol_sl(2))
+      allocate(bc_in(1)%tempk_sl(2))
+      allocate(bc_out(1)%active_suction_sl(2))
+      
+      ! Case 1: filter_btran is false
+      bc_in(1)%filter_btran = .false.
+      bc_in(1)%h2o_liqvol_sl(1) = 1.e-3_r8
+      bc_in(1)%tempk_sl(1) = tfrz + soil_tfrz_thresh + 1.0_r8
+      bc_in(1)%h2o_liqvol_sl(2) = 1.e-3_r8
+      bc_in(1)%tempk_sl(2) = tfrz + soil_tfrz_thresh + 1.0_r8
+      
+      call get_active_suction_layers(nsites, sites, bc_in, bc_out)
+      @assertFalse(bc_out(1)%active_suction_sl(1))
+      @assertFalse(bc_out(1)%active_suction_sl(2))
+      
+      ! Case 2: filter_btran is true
+      bc_in(1)%filter_btran = .true.
+      bc_in(1)%h2o_liqvol_sl(1) = 1.e-3_r8
+      bc_in(1)%tempk_sl(1) = tfrz + soil_tfrz_thresh + 1.0_r8
+      bc_in(1)%h2o_liqvol_sl(2) = 0.0_r8
+      bc_in(1)%tempk_sl(2) = tfrz + soil_tfrz_thresh - 1.0_r8
+
+      call get_active_suction_layers(nsites, sites, bc_in, bc_out)
+      @assertTrue(bc_out(1)%active_suction_sl(1))
+      @assertFalse(bc_out(1)%active_suction_sl(2))
+
+      ! Case 3: filter_btran is true, and both layers have active water
+      ! This covers the permutation where both outputs are true
+      bc_in(1)%filter_btran = .true.
+      bc_in(1)%h2o_liqvol_sl(1) = 1.e-3_r8
+      bc_in(1)%tempk_sl(1) = tfrz + soil_tfrz_thresh + 1.0_r8
+      bc_in(1)%h2o_liqvol_sl(2) = 1.e-3_r8
+      bc_in(1)%tempk_sl(2) = tfrz + soil_tfrz_thresh + 1.0_r8
+
+      call get_active_suction_layers(nsites, sites, bc_in, bc_out)
+      @assertTrue(bc_out(1)%active_suction_sl(1))
+      @assertTrue(bc_out(1)%active_suction_sl(2))
+
+      deallocate(bc_in(1)%h2o_liqvol_sl)
+      deallocate(bc_in(1)%tempk_sl)
+      deallocate(bc_out(1)%active_suction_sl)
+    end subroutine test_get_active_suction_layers
+
+    @Test
+    subroutine test_btran_ed(this)
+      use FatesConstantsMod, only : nocomp_bareground, ifalse
+      use FatesInterfaceTypesMod, only : numpft, hlm_use_planthydro
+      use EDPftvarcon, only : EDPftvarcon_inst
+      use FatesPatchMod, only : fates_patch_type
+      use FatesCohortMod, only : fates_cohort_type
+      use PRTParametersMod, only : prt_params
+      use FatesUnitTestPRTParametersMod, only : init_mock_prt_params
+
+      class(TestEDBtran), intent(inout) :: this
+      integer, parameter :: nsites = 1
+      type(ed_site_type), target :: sites(nsites)
+      type(bc_in_type) :: bc_in(nsites)
+      type(bc_out_type) :: bc_out(nsites)
+      type(fates_patch_type), target :: patch
+      type(fates_cohort_type), target :: cohort
+
+      numpft = 1
+      hlm_use_planthydro = ifalse
+      
+      ! Initialize EDPftvarcon_inst arrays
+      if (.not. allocated(EDPftvarcon_inst%smpsc)) allocate(EDPftvarcon_inst%smpsc(numpft))
+      if (.not. allocated(EDPftvarcon_inst%smpso)) allocate(EDPftvarcon_inst%smpso(numpft))
+      ! Mocking soil matric potential at stomatal closure (smpsc) and open (smpso)
+      ! -1.e6 is a very low (negative) potential for complete closure, -10.0 is typical for open stomata
+      EDPftvarcon_inst%smpsc = -1.e6_r8
+      EDPftvarcon_inst%smpso = -10.0_r8
+
+      call init_mock_prt_params()
+      hlm_use_planthydro = ifalse
+      
+      ! Mocking an exponential root profile (type 2.0) with typical 'a' and 'b' parameters
+      prt_params%fnrt_prof_mode = 2.0_r8 ! exponential_1p_profile_type = 2
+      prt_params%fnrt_prof_a = 7.0_r8
+      prt_params%fnrt_prof_b = 2.0_r8
+
+      bc_in(1)%nlevsoil = 2
+      bc_in(1)%max_rooting_depth_index_col = 2
+      ! We can unconditionally allocate because bc_in and bc_out are local variables
+      ! and their allocatable components start unallocated in this subroutine scope.
+      allocate(bc_in(1)%h2o_liqvol_sl(2))
+      allocate(bc_in(1)%tempk_sl(2))
+      allocate(bc_in(1)%smp_sl(2))
+      allocate(bc_in(1)%eff_porosity_sl(2))
+      allocate(bc_in(1)%watsat_sl(2))
+      
+      allocate(bc_out(1)%rootr_pasl(1,2))
+      allocate(bc_out(1)%btran_pa(1))
+      allocate(sites(1)%zi_soil(0:2))
+      allocate(sites(1)%rootfrac_scr(2))
+
+      sites(1)%zi_soil(0) = 0.0_r8
+      sites(1)%zi_soil(1) = 0.1_r8
+      sites(1)%zi_soil(2) = 0.5_r8
+
+      ! Initialize soil conditions to 0 (freezing, dry soil)
+      bc_in(1)%h2o_liqvol_sl(1) = 0.0_r8
+      bc_in(1)%tempk_sl(1) = 0.0_r8
+      bc_in(1)%smp_sl(1) = 0.0_r8
+      bc_in(1)%eff_porosity_sl(1) = 0.5_r8
+      bc_in(1)%watsat_sl(1) = 0.5_r8
+      
+      bc_in(1)%h2o_liqvol_sl(2) = 0.0_r8
+      bc_in(1)%tempk_sl(2) = 0.0_r8
+      bc_in(1)%smp_sl(2) = 0.0_r8
+      bc_in(1)%eff_porosity_sl(2) = 0.5_r8
+      bc_in(1)%watsat_sl(2) = 0.5_r8
+
+      ! Setup patch
+      patch%patchno = 1
+      ! nocomp_bareground is usually negative or something, so 1 is a veg patch
+      patch%nocomp_pft_label = 1
+      patch%btran_ft = 0.0_r8
+      
+      ! Setup cohort
+      cohort%pft = 1
+      cohort%g_sb_laweight = 1.0_r8
+      
+      ! We set list pointers to null() because we are simulating a single cohort 
+      ! in a single patch, so there are no other cohorts/patches to link to.
+      cohort%shorter => null()
+      patch%tallest => cohort
+      patch%younger => null()
+      
+      sites(1)%oldest_patch => patch
+
+      call btran_ed(nsites, sites, bc_in, bc_out)
+
+      @assertEqual(0.0_r8, bc_out(1)%rootr_pasl(1,1))
+      @assertEqual(0.0_r8, bc_out(1)%rootr_pasl(1,2))
+      @assertEqual(0.0_r8, bc_out(1)%btran_pa(1))
+
+      ! Case 2: active soil layers
+      ! Let's give it water so check_layer_water returns true
+      ! Set liquid volume and temp (280K > freezing) to ensure layer is "active"
+      ! Set smp to -100.0, which is between fully open (-10.0) and fully closed (-1.e6) potentials
+      bc_in(1)%h2o_liqvol_sl(1) = 1.0_r8
+      bc_in(1)%tempk_sl(1) = 280.0_r8
+      bc_in(1)%smp_sl(1) = -100.0_r8
+      bc_in(1)%eff_porosity_sl(1) = 0.5_r8
+      bc_in(1)%watsat_sl(1) = 0.5_r8
+      
+      bc_in(1)%h2o_liqvol_sl(2) = 1.0_r8
+      bc_in(1)%tempk_sl(2) = 280.0_r8
+      bc_in(1)%smp_sl(2) = -100.0_r8
+      bc_in(1)%eff_porosity_sl(2) = 0.5_r8
+      bc_in(1)%watsat_sl(2) = 0.5_r8
+      
+      call btran_ed(nsites, sites, bc_in, bc_out)
+
+      ! Verify physical invariant: root uptake distribution across layers must sum to 1.0
+      @assertEqual(1.0_r8, sum(bc_out(1)%rootr_pasl(1, :)), tolerance=1.0e-10_r8)
+
+      ! Verify exact analytical btran value for smp = -100.0 (smpsc = -1.e6, smpso = -10.0)
+      ! rresis = (-100 - (-1e6)) / (-10 - (-1e6)) = 999900 / 999990 ~ 0.999909999
+      @assertEqual(0.99991_r8, bc_out(1)%btran_pa(1), tolerance=1.0e-4_r8)
+
+      ! Clean up
+      if (allocated(EDPftvarcon_inst%smpsc)) deallocate(EDPftvarcon_inst%smpsc)
+      if (allocated(EDPftvarcon_inst%smpso)) deallocate(EDPftvarcon_inst%smpso)
+
+      if (allocated(bc_in(1)%h2o_liqvol_sl)) deallocate(bc_in(1)%h2o_liqvol_sl)
+      if (allocated(bc_in(1)%tempk_sl)) deallocate(bc_in(1)%tempk_sl)
+      if (allocated(bc_in(1)%smp_sl)) deallocate(bc_in(1)%smp_sl)
+      if (allocated(bc_in(1)%eff_porosity_sl)) deallocate(bc_in(1)%eff_porosity_sl)
+      if (allocated(bc_in(1)%watsat_sl)) deallocate(bc_in(1)%watsat_sl)
+      if (allocated(bc_out(1)%rootr_pasl)) deallocate(bc_out(1)%rootr_pasl)
+      if (allocated(bc_out(1)%btran_pa)) deallocate(bc_out(1)%btran_pa)
+      if (allocated(sites(1)%zi_soil)) deallocate(sites(1)%zi_soil)
+      if (allocated(sites(1)%rootfrac_scr)) deallocate(sites(1)%rootfrac_scr)
+
+    end subroutine test_btran_ed
+
+    @Test
+    subroutine test_btran_edge_cases(this)
+      use FatesConstantsMod, only : nocomp_bareground, ifalse
+      use FatesInterfaceTypesMod, only : numpft, hlm_use_planthydro
+      use EDPftvarcon, only : EDPftvarcon_inst
+      use FatesPatchMod, only : fates_patch_type
+      use FatesCohortMod, only : fates_cohort_type
+      use PRTParametersMod, only : prt_params
+      use FatesUnitTestPRTParametersMod, only : init_mock_prt_params
+
+      class(TestEDBtran), intent(inout) :: this
+      integer, parameter :: nsites = 1
+      type(ed_site_type), target :: sites(nsites)
+      type(bc_in_type) :: bc_in(nsites)
+      type(bc_out_type) :: bc_out(nsites)
+      type(fates_patch_type), target :: patch
+      type(fates_cohort_type), target :: cohort
+
+      numpft = 1
+      hlm_use_planthydro = ifalse
+
+      if (.not. allocated(EDPftvarcon_inst%smpsc)) allocate(EDPftvarcon_inst%smpsc(numpft))
+      if (.not. allocated(EDPftvarcon_inst%smpso)) allocate(EDPftvarcon_inst%smpso(numpft))
+      EDPftvarcon_inst%smpsc = -1.e6_r8 ! Closure matric potential [mm / Pa equivalent]
+      EDPftvarcon_inst%smpso = -10.0_r8 ! Open matric potential [mm / Pa equivalent]
+
+      call init_mock_prt_params()
+      prt_params%fnrt_prof_mode = 2.0_r8
+      prt_params%fnrt_prof_a = 7.0_r8
+      prt_params%fnrt_prof_b = 2.0_r8
+
+      bc_in(1)%nlevsoil = 2
+      bc_in(1)%max_rooting_depth_index_col = 2
+      allocate(bc_in(1)%h2o_liqvol_sl(2))
+      allocate(bc_in(1)%tempk_sl(2))
+      allocate(bc_in(1)%smp_sl(2))
+      allocate(bc_in(1)%eff_porosity_sl(2))
+      allocate(bc_in(1)%watsat_sl(2))
+      allocate(bc_out(1)%rootr_pasl(1,2))
+      allocate(bc_out(1)%btran_pa(1))
+      allocate(sites(1)%zi_soil(0:2))
+      allocate(sites(1)%rootfrac_scr(2))
+
+      sites(1)%zi_soil(0) = 0.0_r8
+      sites(1)%zi_soil(1) = 0.1_r8
+      sites(1)%zi_soil(2) = 0.5_r8
+
+      ! Setup active water conditions with smp <= smpsc (completely dry soil below closure potential)
+      bc_in(1)%h2o_liqvol_sl(:) = 1.0_r8
+      bc_in(1)%tempk_sl(:) = 280.0_r8
+      bc_in(1)%smp_sl(:) = -2.e6_r8 ! Below smpsc (-1.e6)
+      bc_in(1)%eff_porosity_sl(:) = 0.5_r8
+      bc_in(1)%watsat_sl(:) = 0.5_r8
+
+      patch%patchno = 1
+      patch%nocomp_pft_label = 1
+      patch%btran_ft = 0.0_r8
+      cohort%pft = 1
+      cohort%g_sb_laweight = 1.0_r8
+      cohort%shorter => null()
+      patch%tallest => cohort
+      patch%younger => null()
+      sites(1)%oldest_patch => patch
+
+      call btran_ed(nsites, sites, bc_in, bc_out)
+
+      ! Complete stomatal closure expected when smp <= smpsc
+      @assertEqual(0.0_r8, bc_out(1)%btran_pa(1), tolerance=1.0e-10_r8)
+
+      ! Test wet soil (smp >= smpso, optimal transpiration)
+      bc_in(1)%smp_sl(:) = -5.0_r8 ! Above smpso (-10.0)
+      call btran_ed(nsites, sites, bc_in, bc_out)
+      @assertEqual(1.0_r8, bc_out(1)%btran_pa(1), tolerance=1.0e-10_r8)
+
+      ! Test zero cohort conductance fallback (sum_pftgs = 0)
+      cohort%g_sb_laweight = 0.0_r8
+      call btran_ed(nsites, sites, bc_in, bc_out)
+      @assertEqual(1.0_r8, sum(bc_out(1)%rootr_pasl(1, :)), tolerance=1.0e-10_r8)
+      @assertEqual(1.0_r8, bc_out(1)%btran_pa(1), tolerance=1.0e-10_r8)
+
+      ! Clean up
+      if (allocated(EDPftvarcon_inst%smpsc)) deallocate(EDPftvarcon_inst%smpsc)
+      if (allocated(EDPftvarcon_inst%smpso)) deallocate(EDPftvarcon_inst%smpso)
+      if (allocated(bc_in(1)%h2o_liqvol_sl)) deallocate(bc_in(1)%h2o_liqvol_sl)
+      if (allocated(bc_in(1)%tempk_sl)) deallocate(bc_in(1)%tempk_sl)
+      if (allocated(bc_in(1)%smp_sl)) deallocate(bc_in(1)%smp_sl)
+      if (allocated(bc_in(1)%eff_porosity_sl)) deallocate(bc_in(1)%eff_porosity_sl)
+      if (allocated(bc_in(1)%watsat_sl)) deallocate(bc_in(1)%watsat_sl)
+      if (allocated(bc_out(1)%rootr_pasl)) deallocate(bc_out(1)%rootr_pasl)
+      if (allocated(bc_out(1)%btran_pa)) deallocate(bc_out(1)%btran_pa)
+      if (allocated(sites(1)%zi_soil)) deallocate(sites(1)%zi_soil)
+      if (allocated(sites(1)%rootfrac_scr)) deallocate(sites(1)%rootfrac_scr)
+
+    end subroutine test_btran_edge_cases
+
+    !> Summary: Verifies multi-PFT zero-conductance fallback normalizes root uptake distribution to sum to 1.0.
+    @Test
+    subroutine test_btran_multipft_fallback_killing_test(this)
+      use FatesConstantsMod, only : nocomp_bareground, ifalse
+      use FatesInterfaceTypesMod, only : numpft, hlm_use_planthydro
+      use EDPftvarcon, only : EDPftvarcon_inst
+      use FatesPatchMod, only : fates_patch_type
+      use FatesCohortMod, only : fates_cohort_type
+      use PRTParametersMod, only : prt_params
+      use FatesUnitTestPRTParametersMod, only : init_mock_prt_params
+
+      class(TestEDBtran), intent(inout) :: this
+      integer, parameter :: nsites = 1
+      type(ed_site_type), target :: sites(nsites)
+      type(bc_in_type) :: bc_in(nsites)
+      type(bc_out_type) :: bc_out(nsites)
+      type(fates_patch_type), target :: patch
+
+      numpft = 2 ! Test multi-PFT configuration (numpft > 1)
+      hlm_use_planthydro = ifalse
+
+      if (.not. allocated(EDPftvarcon_inst%smpsc)) allocate(EDPftvarcon_inst%smpsc(numpft))
+      if (.not. allocated(EDPftvarcon_inst%smpso)) allocate(EDPftvarcon_inst%smpso(numpft))
+      EDPftvarcon_inst%smpsc = -1.e6_r8
+      EDPftvarcon_inst%smpso = -10.0_r8
+
+      call init_mock_prt_params()
+      prt_params%fnrt_prof_mode(:) = 2.0_r8
+      prt_params%fnrt_prof_a(:) = 7.0_r8
+      prt_params%fnrt_prof_b(:) = 2.0_r8
+
+      bc_in(1)%nlevsoil = 2
+      bc_in(1)%max_rooting_depth_index_col = 2
+      allocate(bc_in(1)%h2o_liqvol_sl(2))
+      allocate(bc_in(1)%tempk_sl(2))
+      allocate(bc_in(1)%smp_sl(2))
+      allocate(bc_in(1)%eff_porosity_sl(2))
+      allocate(bc_in(1)%watsat_sl(2))
+      allocate(bc_out(1)%rootr_pasl(1,2))
+      allocate(bc_out(1)%btran_pa(1))
+      allocate(sites(1)%zi_soil(0:2))
+      allocate(sites(1)%rootfrac_scr(2))
+
+      sites(1)%zi_soil(0) = 0.0_r8
+      sites(1)%zi_soil(1) = 0.1_r8
+      sites(1)%zi_soil(2) = 0.5_r8
+
+      bc_in(1)%h2o_liqvol_sl(:) = 1.0_r8
+      bc_in(1)%tempk_sl(:) = 280.0_r8
+      bc_in(1)%smp_sl(:) = -100.0_r8
+      bc_in(1)%eff_porosity_sl(:) = 0.5_r8
+      bc_in(1)%watsat_sl(:) = 0.5_r8
+
+      patch%patchno = 1
+      patch%nocomp_pft_label = 1
+      patch%btran_ft = 0.0_r8
+      ! No cohorts attached -> sum_pftgs = 0.0 (triggers fallback loop)
+      patch%tallest => null()
+      patch%younger => null()
+      sites(1)%oldest_patch => patch
+
+      call btran_ed(nsites, sites, bc_in, bc_out)
+
+      ! Killing Assertion: Total root uptake distribution sum MUST be 1.0 across layers
+      ! If 1._r8/numpft is omitted in the fallback loop, sum(rootr_pasl) will be 2.0 instead of 1.0
+      @assertEqual(1.0_r8, sum(bc_out(1)%rootr_pasl(1, :)), tolerance=1.0e-10_r8)
+
+      ! Clean up
+      if (allocated(EDPftvarcon_inst%smpsc)) deallocate(EDPftvarcon_inst%smpsc)
+      if (allocated(EDPftvarcon_inst%smpso)) deallocate(EDPftvarcon_inst%smpso)
+      if (allocated(bc_in(1)%h2o_liqvol_sl)) deallocate(bc_in(1)%h2o_liqvol_sl)
+      if (allocated(bc_in(1)%tempk_sl)) deallocate(bc_in(1)%tempk_sl)
+      if (allocated(bc_in(1)%smp_sl)) deallocate(bc_in(1)%smp_sl)
+      if (allocated(bc_in(1)%eff_porosity_sl)) deallocate(bc_in(1)%eff_porosity_sl)
+      if (allocated(bc_in(1)%watsat_sl)) deallocate(bc_in(1)%watsat_sl)
+      if (allocated(bc_out(1)%rootr_pasl)) deallocate(bc_out(1)%rootr_pasl)
+      if (allocated(bc_out(1)%btran_pa)) deallocate(bc_out(1)%btran_pa)
+      if (allocated(sites(1)%zi_soil)) deallocate(sites(1)%zi_soil)
+      if (allocated(sites(1)%rootfrac_scr)) deallocate(sites(1)%rootfrac_scr)
+
+    end subroutine test_btran_multipft_fallback_killing_test
+
+    !> Summary: Verifies the full piecewise linear response curve of BTRAN matric potential stress across a gradient
+    @Test
+    subroutine test_btran_sweep(this)
+      use FatesConstantsMod, only : nocomp_bareground, ifalse
+      use FatesInterfaceTypesMod, only : numpft, hlm_use_planthydro
+      use EDPftvarcon, only : EDPftvarcon_inst
+      use FatesPatchMod, only : fates_patch_type
+      use FatesCohortMod, only : fates_cohort_type
+      use PRTParametersMod, only : prt_params
+      use FatesUnitTestPRTParametersMod, only : init_mock_prt_params
+
+      class(TestEDBtran), intent(inout) :: this
+      integer, parameter :: nsites = 1
+      type(ed_site_type), target :: sites(nsites)
+      type(bc_in_type) :: bc_in(nsites)
+      type(bc_out_type) :: bc_out(nsites)
+      type(fates_patch_type), target :: patch
+      type(fates_cohort_type), target :: cohort
+      integer :: i
+      
+      ! 1. Define grid of inputs and exact expected analytical outputs
+      ! Inputs: [Saturated, Open, Midpoint, Closed, Bone Dry]
+      real(r8), parameter :: test_psi(5) = [0.0_r8, -66000.0_r8, -160500.0_r8, -255000.0_r8, -500000.0_r8]
+      real(r8), parameter :: expected_beta(5) = [1.0_r8, 1.0_r8, 0.5_r8, 0.0_r8, 0.0_r8]
+
+      numpft = 1
+      hlm_use_planthydro = ifalse
+
+      if (.not. allocated(EDPftvarcon_inst%smpsc)) allocate(EDPftvarcon_inst%smpsc(numpft))
+      if (.not. allocated(EDPftvarcon_inst%smpso)) allocate(EDPftvarcon_inst%smpso(numpft))
+      EDPftvarcon_inst%smpsc = -255000.0_r8 ! Closure matric potential
+      EDPftvarcon_inst%smpso = -66000.0_r8  ! Open matric potential
+
+      call init_mock_prt_params()
+      prt_params%fnrt_prof_mode = 2.0_r8
+      prt_params%fnrt_prof_a = 7.0_r8
+      prt_params%fnrt_prof_b = 2.0_r8
+
+      bc_in(1)%nlevsoil = 1
+      bc_in(1)%max_rooting_depth_index_col = 1
+      allocate(bc_in(1)%h2o_liqvol_sl(1))
+      allocate(bc_in(1)%tempk_sl(1))
+      allocate(bc_in(1)%smp_sl(1))
+      allocate(bc_in(1)%eff_porosity_sl(1))
+      allocate(bc_in(1)%watsat_sl(1))
+      allocate(bc_out(1)%rootr_pasl(1,1))
+      allocate(bc_out(1)%btran_pa(1))
+      allocate(sites(1)%zi_soil(0:1))
+      allocate(sites(1)%rootfrac_scr(1))
+
+      sites(1)%zi_soil(0) = 0.0_r8
+      sites(1)%zi_soil(1) = 1.0_r8
+      sites(1)%rootfrac_scr(1) = 1.0_r8
+
+      bc_in(1)%h2o_liqvol_sl(:) = 1.0_r8
+      bc_in(1)%tempk_sl(:) = 280.0_r8
+      bc_in(1)%eff_porosity_sl(:) = 0.4_r8
+      bc_in(1)%watsat_sl(:) = 0.4_r8
+
+      patch%patchno = 1
+      patch%nocomp_pft_label = 1
+      patch%btran_ft = 0.0_r8
+      cohort%pft = 1
+      cohort%g_sb_laweight = 1.0_r8
+      cohort%shorter => null()
+      patch%tallest => cohort
+      patch%younger => null()
+      sites(1)%oldest_patch => patch
+      
+      ! 2. Parameter Sweep
+      do i = 1, size(test_psi)
+         patch%btran_ft(:) = 0.0_r8
+         bc_in(1)%smp_sl(1) = test_psi(i)
+         
+         call btran_ed(nsites, sites, bc_in, bc_out)
+         
+         @assertEqual(expected_beta(i), patch%btran_ft(1), 1.e-5_r8, &
+                      message="Failed matric potential response curve at point")
+      end do
+
+      ! Clean up
+      if (allocated(EDPftvarcon_inst%smpsc)) deallocate(EDPftvarcon_inst%smpsc)
+      if (allocated(EDPftvarcon_inst%smpso)) deallocate(EDPftvarcon_inst%smpso)
+      if (allocated(bc_in(1)%h2o_liqvol_sl)) deallocate(bc_in(1)%h2o_liqvol_sl)
+      if (allocated(bc_in(1)%tempk_sl)) deallocate(bc_in(1)%tempk_sl)
+      if (allocated(bc_in(1)%smp_sl)) deallocate(bc_in(1)%smp_sl)
+      if (allocated(bc_in(1)%eff_porosity_sl)) deallocate(bc_in(1)%eff_porosity_sl)
+      if (allocated(bc_in(1)%watsat_sl)) deallocate(bc_in(1)%watsat_sl)
+      if (allocated(bc_out(1)%rootr_pasl)) deallocate(bc_out(1)%rootr_pasl)
+      if (allocated(bc_out(1)%btran_pa)) deallocate(bc_out(1)%btran_pa)
+      if (allocated(sites(1)%zi_soil)) deallocate(sites(1)%zi_soil)
+      if (allocated(sites(1)%rootfrac_scr)) deallocate(sites(1)%rootfrac_scr)
+
+    end subroutine test_btran_sweep
+
+end module test_EDBtran
